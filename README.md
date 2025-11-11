@@ -1,204 +1,315 @@
-# GitHub Repository Ingestion Tool
+# 🧠 GitHub Repository Ingestion Suite
 
-A Python tool to extract and analyze code from GitHub repositories using `gitingest`. This tool converts entire repositories or specific subdirectories into digestible text files suitable for analysis, documentation, or LLM processing.
+A powerful Python-based toolkit to **extract and analyze GitHub repositories** using [`gitingest`](https://pypi.org/project/gitingest/).
+It supports both **CLI** and a **Streamlit-based graphical interface** for convenient repository ingestion, documentation generation, and LLM-ready text conversion.
 
-## Features
+---
 
-- 🔐 Support for both public and private repositories (with GitHub token)
-- 📂 Ingest entire repositories or specific subdirectories
-- 📝 Generates formatted text output with summary, tree structure, and content
-- ⚙️ Configurable options (submodules, gitignored files, file size limits)
-- 🚀 Simple command-line interface
+## 🚀 Features
 
-## Installation
+### 🧰 Core (CLI)
 
-1. Clone or download this project
-2. Install dependencies:
+* 🔐 Works with **public and private repositories** (via GitHub token)
+* 🌳 Supports **branch-wise ingestion**
+* 📂 Ingest **entire repositories** or **specific subdirectories**
+* 🧩 Configurable:
+
+  * Include submodules (`--include-submodules`)
+  * Include `.gitignored` files (`--include-gitignored`)
+  * Limit by file size (`--max-file-size`)
+* 💾 Supports **custom output paths and filenames**
+* 📝 Produces rich text output:
+
+  * Repository info
+  * Directory tree
+  * Summary
+  * Full content
+
+### 💡 Streamlit UI
+
+* 🎨 Clean web interface (runs locally)
+* ⚙️ Settings page for **GitHub token management**
+* 🧠 Persistent **cache** remembers last used values
+* 🧾 View generated text directly in the browser
+* 💾 Download output directly
+* 📁 Select or auto-create output folder
+* ✅ Windows-compatible (Proactor event loop fix applied)
+
+---
+
+## 🧩 Installation
+
+1. Clone or download this repository:
+
+```bash
+git clone https://github.com/your-user/repo-ingest-tool.git
+cd repo-ingest-tool
+```
+
+2. Create and activate a virtual environment *(recommended)*:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate    # on Windows
+source .venv/bin/activate # on Mac/Linux
+```
+
+3. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-This installs:
-- `gitingest` - Repository ingestion library
-- `python-dotenv` - Environment variable management
+**Dependencies include:**
 
-3. Set up your GitHub token (for private repositories):
+* `gitingest` — Core ingestion library
+* `streamlit` — Web UI framework
+* `python-dotenv` — Environment variable management
 
-```bash
-# Copy the example file
-cp .env.example .env
+---
 
-# Edit .env and add your token
-# GITHUB_TOKEN=ghp_your_token_here
-```
+## 🔑 Setup GitHub Token
 
-Get your token at: https://github.com/settings/personal-access-tokens
+For **private repositories**, you must use a GitHub Personal Access Token.
 
-## Usage
+1. Visit [GitHub Personal Access Tokens](https://github.com/settings/personal-access-tokens)
+2. Click **“Generate new token (classic)”**
+3. Give it a name and select **`repo`** scope
+4. Copy the token — you won’t see it again!
 
-### Basic Examples
-
-**Ingest a public repository:**
-```bash
-python repo_ingest.py https://github.com/user/repo
-```
-
-**Ingest a private repository (with .env configured):**
-```bash
-# Token automatically loaded from .env file
-python repo_ingest.py https://github.com/user/repo
-```
-
-**Ingest a private repository (without .env):**
-```bash
-python repo_ingest.py https://github.com/user/repo --token ghp_your_github_token
-```
-
-**Ingest a specific subdirectory:**
-```bash
-python repo_ingest.py https://github.com/user/repo --subpath src/core
-```
-
-**Custom output file:**
-```bash
-python repo_ingest.py https://github.com/user/repo -o my_analysis.txt
-```
-
-**Include submodules and gitignored files:**
-```bash
-python repo_ingest.py https://github.com/user/repo --include-submodules --include-gitignored
-```
-
-### Command-Line Options
-
-```
-positional arguments:
-  repo_url              GitHub repository URL (e.g., https://github.com/user/repo)
-
-optional arguments:
-  -h, --help            Show help message and exit
-  -t TOKEN, --token TOKEN
-                        GitHub Personal Access Token (or set GITHUB_TOKEN env var)
-  -s SUBPATH, --subpath SUBPATH
-                        Optional deeper path within the repository (e.g., src/core)
-  -o OUTPUT, --output OUTPUT
-                        Output file path (default: <repo_name>_digest.txt)
-  --include-submodules  Include repository submodules
-  --include-gitignored  Include files listed in .gitignore
-  --max-file-size MAX_FILE_SIZE
-                        Maximum file size to process in bytes
-```
-
-## Getting a GitHub Token
-
-For private repositories, you need a GitHub Personal Access Token:
-
-1. Go to https://github.com/settings/personal-access-tokens
-2. Click "Generate new token" (classic)
-3. Give it a name and select scopes (at minimum: `repo` for private repos)
-4. Click "Generate token"
-5. Copy the token (you won't see it again!)
-
-### Recommended: Use .env file
-
-Create a `.env` file in your project directory:
+### Option 1: Store in `.env`
 
 ```bash
 GITHUB_TOKEN=ghp_your_token_here
 ```
 
-The tool will automatically load the token from this file. **No need to pass `--token` every time!**
+### Option 2: Environment variable
 
-### Alternative Methods
-
-**Method 2: Environment variable**
 ```bash
-export GITHUB_TOKEN=ghp_xxxxx  # Linux/Mac
-set GITHUB_TOKEN=ghp_xxxxx     # Windows CMD
+set GITHUB_TOKEN=ghp_xxxxx    # Windows
+export GITHUB_TOKEN=ghp_xxxxx # Mac/Linux
 ```
 
-**Method 3: Command-line argument**
+### Option 3: CLI flag
+
 ```bash
 python repo_ingest.py https://github.com/user/repo --token ghp_xxxxx
 ```
 
-## Output Format
+---
 
-The generated text file contains:
+## ⚙️ Command-Line Usage
 
-1. **Repository Information**: URL and metadata
-2. **Summary**: Statistics about the repository
-3. **Directory Tree**: Visual representation of the file structure
-4. **Content**: Full source code with clear file separators
+### 🧩 Basic Ingestion Examples
 
-Example output filename:
-- Entire repo: `repo-name_digest.txt`
-- Subdirectory: `repo-name_src_core_digest.txt`
+**Ingest a public repository:**
 
-## Use Cases
-
-- 📚 Code documentation and analysis
-- 🤖 Preparing codebases for LLM processing
-- 🔍 Code review and auditing
-- 📊 Repository analysis and statistics
-- 🎓 Learning and studying code structure
-
-## Advanced Examples
-
-### Ingest specific path with custom settings
 ```bash
-# Token loaded from .env automatically
-python repo_ingest.py \
-  https://github.com/user/repo \
-  --subpath src/api/controllers \
-  --output api_controllers_analysis.txt \
-  --max-file-size 1048576
+python repo_ingest.py https://github.com/user/repo
 ```
 
-### Batch processing multiple repositories
+**Ingest a private repository (token auto-loaded from .env):**
+
 ```bash
-#!/bin/bash
-# ingest_multiple.sh
-
-REPOS=(
-  "https://github.com/user/repo1"
-  "https://github.com/user/repo2"
-  "https://github.com/user/repo3"
-)
-
-# Token loaded from .env automatically
-for repo in "${REPOS[@]}"; do
-  python repo_ingest.py "$repo"
-done
+python repo_ingest.py https://github.com/user/repo
 ```
 
-## Troubleshooting
+**Ingest from a specific branch:**
 
-**Issue**: "Error: Repository URL must start with https://github.com/"
-- Solution: Ensure you're using the full HTTPS URL, not SSH or other formats
+```bash
+python repo_ingest.py https://github.com/user/repo --branch dev
+```
 
-**Issue**: Authentication errors for private repos
-- Solution: Verify your GitHub token has the correct permissions (`repo` scope)
+**Ingest a specific subdirectory:**
 
-**Issue**: Large repository taking too long
-- Solution: Use `--subpath` to focus on specific directories or `--max-file-size` to limit file sizes
+```bash
+python repo_ingest.py https://github.com/user/repo --subpath src/backend
+```
 
-## Dependencies
+**Custom output file:**
 
-- Python 3.7+
-- gitingest (automatically handles Git operations and parsing)
+```bash
+python repo_ingest.py https://github.com/user/repo -o "C:\Output\repo_backend.txt"
+```
 
-## License
+**Include submodules and gitignored files:**
 
-This tool is provided as-is for educational and development purposes.
+```bash
+python repo_ingest.py https://github.com/user/repo --include-submodules --include-gitignored
+```
 
-## Contributing
+**Limit file size (e.g., 500KB):**
 
-Feel free to submit issues, fork the repository, and create pull requests for any improvements.
+```bash
+python repo_ingest.py https://github.com/user/repo --max-file-size 512000
+```
 
-## Related Resources
+---
 
-- [gitingest Documentation](https://pypi.org/project/gitingest/)
-- [GitHub Personal Access Tokens](https://github.com/settings/tokens)
-- [GitHub REST API](https://docs.github.com/en/rest)
+### 🧩 Full Command Reference
+
+| Flag                   | Description                                                   |
+| ---------------------- | ------------------------------------------------------------- |
+| `repo_url`             | GitHub repository URL (must start with `https://github.com/`) |
+| `-t, --token`          | GitHub Personal Access Token                                  |
+| `-b, --branch`         | Branch or ref to ingest (`main`, `dev`, etc.)                 |
+| `-s, --subpath`        | Optional subdirectory path                                    |
+| `-o, --output`         | Custom output file path                                       |
+| `--include-submodules` | Include repository submodules                                 |
+| `--include-gitignored` | Include files listed in `.gitignore`                          |
+| `--max-file-size`      | Maximum size per file (bytes)                                 |
+
+---
+
+### 🧠 Example — Complete Command
+
+```bash
+python repo_ingest.py "https://github.com/MrAk47Anand007/QuickComm---Hyperlocal-Quick-Commerce-Platform" --branch dev --subpath backend -o "C:\Users\Anand\Desktop\backend_dev_extract.txt" --token ghp_yourGitHubTokenHere
+```
+
+---
+
+## 💻 Streamlit Web UI
+
+You can also run a **beautiful GUI** with caching and live preview.
+
+### 🧩 Launch the App
+
+```bash
+streamlit run app.py
+```
+
+### 🔧 Features in UI
+
+| Section         | Functionality                                                       |
+| --------------- | ------------------------------------------------------------------- |
+| **Ingest Page** | Enter repo URL, branch, subpath, output folder, and generate output |
+| **Settings**    | Manage GitHub token (`.env` stored)                                 |
+| **Cache**       | View or clear saved field values                                    |
+| **About**       | Learn about the tool and backend logic                              |
+
+### 🗂 Persistent Cache
+
+* Saves previous inputs (except tokens) to `.repo_ingest_cache.json`
+* Auto-loads cached values on restart
+* Clear anytime from the **Cache** page
+
+### 🪶 Windows Fix
+
+If you’re on Windows, the app automatically applies the **Proactor event loop policy** to fix `NotImplementedError` from asyncio.
+
+---
+
+## 📜 Output Format
+
+Each generated text file includes:
+
+1. **Repository metadata**
+2. **Summary**
+3. **Directory tree structure**
+4. **Full code content**
+
+Example auto-generated filename:
+
+```
+repo_name_dev_backend_digest.txt
+```
+
+---
+
+## 🧪 Example Use Cases
+
+| Use Case         | Description                                                  |
+| ---------------- | ------------------------------------------------------------ |
+| 🤖 LLM Training  | Convert repo code into structured text for context ingestion |
+| 📚 Documentation | Automatically generate repository summaries and structure    |
+| 🧮 Analysis      | Extract and analyze code structure for audits or metrics     |
+| 🧑‍💻 Research   | Study project patterns or architecture easily                |
+
+---
+
+## 🩺 Troubleshooting
+
+| Issue                                                                           | Solution                                                                  |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **`NotImplementedError` from asyncio**                                          | Windows fix applied — ensure Proactor policy is set (already in `app.py`) |
+| **"Repository URL must start with [https://github.com/](https://github.com/)"** | Use HTTPS link (not SSH)                                                  |
+| **Private repo access denied**                                                  | Check token permissions (`repo` scope)                                    |
+| **Output path not found**                                                       | Ensure folder exists or use `--output` to specify valid directory         |
+| **Large repo takes long**                                                       | Use `--subpath` or limit file size with `--max-file-size`                 |
+
+---
+
+## 🧱 Folder Structure
+
+```
+GitRepoExtracter/
+│
+├── repo_ingest.py           # CLI ingestion tool (main entry point)
+├── repo_ingester.py         # Library version (programmatic API)
+├── app.py                   # Streamlit UI (with caching + settings)
+├── .env                     # GitHub token (optional)
+├── .repo_ingest_cache.json  # Cached UI values (auto-created)
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## 📦 Requirements
+
+* **Python** ≥ 3.8
+* **Libraries**:
+
+  * `gitingest`
+  * `streamlit`
+  * `python-dotenv`
+
+Install all at once:
+
+```bash
+pip install gitingest streamlit python-dotenv
+```
+
+---
+
+## 🪄 Example Workflow
+
+### 1️⃣ CLI (quick extraction)
+
+```bash
+python repo_ingest.py "https://github.com/user/repo" --branch main --subpath src
+```
+
+### 2️⃣ UI (interactive)
+
+```bash
+streamlit run app.py
+```
+
+Use the interface to set repo, branch, output path → click **Generate** → view and download results.
+
+---
+
+## ⚖️ License
+
+This project is provided **as-is** for learning and development purposes.
+Feel free to modify or integrate it into your own workflows.
+
+---
+
+## 🤝 Contributing
+
+Pull requests and feature suggestions are welcome!
+If you build new capabilities (like multi-branch ingestion or repo comparison), feel free to share them.
+
+---
+
+## 🔗 Related Resources
+
+* [📦 gitingest PyPI](https://pypi.org/project/gitingest/)
+* [🔐 GitHub Personal Access Tokens](https://github.com/settings/tokens)
+* [🧭 GitHub REST API Docs](https://docs.github.com/en/rest)
+* [💡 Streamlit Documentation](https://docs.streamlit.io)
+
+---
