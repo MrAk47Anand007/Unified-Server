@@ -1,444 +1,479 @@
-# app.py
 """
-Streamlit UI for GitHub Repository Ingestion (with persistent cache)
-- Uses your existing repo_ingest.ingest_repository or RepoIngester if available.
-- Settings page to change GitHub token (stored in .env)
-- Inputs: repo URL, branch, subpath, output folder, include options
-- Generate button runs ingestion synchronously and shows logs + output text
-- Persistent JSON cache (.repo_ingest_cache.json) to remember non-sensitive fields across restarts
+Unified Server - GitRepoExtractor + LinguaFix
+A combined Streamlit application for repository ingestion and grammar correction
+Uses modular grammar corrector with retry logic and proper error handling
 """
 
 import os
 import sys
-import json
-import traceback
+import asyncio
 from pathlib import Path
-from typing import Optional
-
+from typing import Optional, Tuple
 import streamlit as st
-from dotenv import load_dotenv, set_key, find_dotenv, dotenv_values
+from dotenv import load_dotenv
+import json
 
-# -------------------------
-# Configuration / Constants
-# -------------------------
-CACHE_FILE = ".repo_ingest_cache.json"
-load_dotenv()
-ENV_PATH = find_dotenv() or ".env"
-
+# Windows fix for asyncio
 if sys.platform == "win32":
-    import asyncio
-    try:
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    except Exception:
-        # ignore if policy cannot be set for some reason
-        pass
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-# -------------------------
-# Try to import ingestion backends
-# -------------------------
-_ingest_func = None
-_ingester_class = None
+# Load environment variables
+load_dotenv()
+
+# Import gitingest
 try:
-    from repo_ingest import ingest_repository as _imported_ingest_repository  # CLI file
-    _ingest_func = _imported_ingest_repository
-except Exception:
-    try:
-        from repo_ingester import RepoIngester as _imported_repo_ingester
-        _ingester_class = _imported_repo_ingester
-    except Exception:
+    from gitingest import ingest
+except ImportError:
+    st.error("Please install gitingest: pip install gitingest")
+    st.stop()
+
+# Import grammar corrector module
+try:
+    from grammar_corrector import GrammarCorrector, GrammarCorrectionError
+except ImportError:
+    st.error("grammar_corrector.py module not found")
+    st.stop()
+
+# Cache file for storing settings
+CACHE_FILE = ".unified_server_cache.json"
+
+# Page configuration
+st.set_page_config(
+    page_title="Unified Server - Repo & Grammar",
+    page_icon="🚀",
+    layout="wide"
+)
+
+
+# Utility functions for caching
+def load_cache():
+    """Load cached values from file"""
+    if os.path.exists(CACHE_FILE):
         try:
-            from repo_ingester import ingest_repo_branch as _imported_ingest_repo_branch
-            _ingest_func = _imported_ingest_repo_branch
-        except Exception:
-            _ingest_func = None
-            _ingester_class = None
+            with open(CACHE_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
 
-# -------------------------
-# Cache helpers
-# -------------------------
-DEFAULT_CACHE = {
-    "repo_url": "https://github.com/MrAk47Anand007/QuickComm---Hyperlocal-Quick-Commerce-Platform",
-    "branch": "dev",
-    "subpath": "backend",
-    "output_folder": str(Path.cwd()),
-    "output_filename": "",
-    "include_submodules": False,
-    "include_gitignored": False,
-    "max_file_size": 0
-}
 
-def load_cache() -> dict:
-    """Load cache from CACHE_FILE, falling back to defaults."""
-    try:
-        p = Path(CACHE_FILE)
-        if p.exists():
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            # Merge defaults -> data to ensure keys exist
-            merged = DEFAULT_CACHE.copy()
-            merged.update({k: v for k, v in data.items() if k in merged})
-            return merged
-        else:
-            return DEFAULT_CACHE.copy()
-    except Exception as e:
-        # If cache corrupted, ignore and return defaults
-        st.warning(f"Warning: failed to load cache ({e}). Using defaults.")
-        return DEFAULT_CACHE.copy()
+def save_cache(cache_data):
+    """Save cache to file"""
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(cache_data, f, indent=2)
 
-def save_cache(values: dict):
-    """Save provided values (only allowed keys) into CACHE_FILE."""
-    try:
-        allowed = {k: DEFAULT_CACHE[k] for k in DEFAULT_CACHE.keys()}
-        # sanitize incoming values - keep only allowed keys
-        to_save = {k: values.get(k, allowed[k]) for k in allowed.keys()}
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(to_save, f, indent=2)
-    except Exception as e:
-        st.error(f"Failed to write cache: {e}")
 
-def clear_cache():
-    p = Path(CACHE_FILE)
-    if p.exists():
-        p.unlink()
+def save_github_token(token: str):
+    """Save GitHub token to .env file"""
+    env_path = Path('.env')
 
-# -------------------------
-# .env token helper
-# -------------------------
-def save_token_to_env(token: str):
-    """Save GITHUB_TOKEN to .env (create if needed)."""
-    token = token.strip()
-    if not ENV_PATH or ENV_PATH == "":
-        # create .env file
-        with open(".env", "w", encoding="utf-8") as f:
-            f.write(f"GITHUB_TOKEN={token}\n")
-        set_result = True
-    else:
-        try:
-            set_key(ENV_PATH, "GITHUB_TOKEN", token)
-            set_result = True
-        except Exception:
-            # fallback: append or overwrite manually
-            vals = dotenv_values(ENV_PATH)
-            d = dict(vals)
-            d["GITHUB_TOKEN"] = token
-            with open(ENV_PATH, "w", encoding="utf-8") as f:
-                for k, v in d.items():
-                    f.write(f"{k}={v}\n")
-            set_result = True
-    # reload env
+    # Read existing .env content
+    existing_content = {}
+    if env_path.exists():
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    existing_content[key.strip()] = value.strip()
+
+    # Update token
+    existing_content['GITHUB_TOKEN'] = token
+
+    # Write back
+    with open(env_path, 'w') as f:
+        for key, value in existing_content.items():
+            f.write(f"{key}={value}\n")
+
+    # Reload environment
     load_dotenv(override=True)
-    os.environ["GITHUB_TOKEN"] = token
-    return set_result
+    os.environ['GITHUB_TOKEN'] = token
 
-# -------------------------
-# Utility functions for ingestion calls (try multiple signatures)
-# -------------------------
-def validate_repo_url(url: str) -> bool:
-    return url.startswith("https://github.com/")
 
-def ensure_output_dir(path: str) -> Path:
-    p = Path(path)
-    if p.exists():
-        if p.is_file():
-            raise ValueError("Output folder path points to a file, not a directory.")
-        return p
+def save_gemini_key(api_key: str):
+    """Save Gemini API key to .env file"""
+    env_path = Path('.env')
+
+    # Read existing .env content
+    existing_content = {}
+    if env_path.exists():
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    existing_content[key.strip()] = value.strip()
+
+    # Update API key
+    existing_content['GEMINI_API_KEY'] = api_key
+
+    # Write back
+    with open(env_path, 'w') as f:
+        for key, value in existing_content.items():
+            f.write(f"{key}={value}\n")
+
+    # Reload environment
+    load_dotenv(override=True)
+    os.environ['GEMINI_API_KEY'] = api_key
+
+
+def ingest_repository(
+    repo_url: str,
+    subpath: Optional[str] = None,
+    branch: Optional[str] = None,
+    output_file: Optional[str] = None,
+    include_submodules: bool = False,
+    max_file_size: Optional[int] = None
+) -> Tuple[str, str, str]:
+    """Ingest a GitHub repository"""
+
+    # Build full URL
+    if subpath:
+        subpath = subpath.strip('/')
+        if branch:
+            full_url = f"{repo_url}/tree/{branch}/{subpath}"
+        else:
+            full_url = f"{repo_url}/tree/main/{subpath}"
     else:
-        p.mkdir(parents=True, exist_ok=True)
-        return p
+        full_url = f"{repo_url}/tree/{branch}" if branch else repo_url
 
-def run_ingest_using_function(func, repo_url, token, subpath, branch, output_file, include_submodules, include_gitignored, max_file_size, logger):
-    # Try calling function with a flexible approach
-    try:
-        kwargs = {
-            "repo_url": repo_url,
-            "token": token,
-            "subpath": subpath,
-            "branch": branch,
-            "output_file": output_file,
-            "include_submodules": include_submodules,
-            "include_gitignored": include_gitignored,
-            "max_file_size": max_file_size
-        }
-        # filter None values
-        call_kwargs = {k: v for k, v in kwargs.items() if v is not None}
-        logger.write("Calling ingestion function with flexible kwargs...\n")
-        return func(**call_kwargs)
-    except TypeError as e:
-        logger.write(f"Full-kwargs call failed: {e}\nTrying simpler signatures...\n")
-    except Exception as e:
-        logger.write(f"Error while calling ingestion function: {e}\n")
-        raise
+    # Prepare ingest parameters
+    ingest_params = {
+        "source": full_url,
+        "include_submodules": include_submodules,
+    }
 
-    # try signature: func(repo_url, token, subpath, output_file)
-    try:
-        logger.write("Trying signature: func(repo_url, token, subpath, output_file)\n")
-        return func(repo_url, token, subpath, output_file)
-    except Exception as e:
-        logger.write(f"Signature attempt failed: {e}\n")
-        raise
+    if max_file_size:
+        ingest_params["max_file_size"] = max_file_size
 
-def run_ingest_using_class(cls, repo_url, token, subpath, branch, output_file, include_submodules, include_gitignored, max_file_size, logger):
-    # instantiate class
-    try:
-        ing = cls(token=token)
-    except Exception as e:
-        logger.write(f"Failed to instantiate ingester class: {e}\n")
-        raise
-    # call ingest_repo, try with branch first
-    try:
-        logger.write("Calling ingester.ingest_repo(...)\n")
-        return ing.ingest_repo(repo_url=repo_url, subpath=subpath, branch=branch, output_file=output_file, include_submodules=include_submodules, max_file_size=max_file_size)
-    except TypeError:
-        logger.write("ingest_repo signature doesn't accept 'branch' — trying without branch...\n")
-        return ing.ingest_repo(repo_url=repo_url, subpath=subpath, output_file=output_file, include_submodules=include_submodules, max_file_size=max_file_size)
-    except Exception as e:
-        logger.write(f"Error in ingester.ingest_repo: {e}\n")
-        raise
+    # Perform ingestion
+    summary, tree, content = ingest(**ingest_params)
 
-# -------------------------
-# Streamlit UI
-# -------------------------
-st.set_page_config(page_title="Repo Ingestor — GUI", layout="wide")
-st.title("🔎 GitHub Repository Ingestion (GUI)")
+    # Save to file if requested
+    if output_file:
+        output_path = Path(output_file)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("REPOSITORY DIGEST\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(f"Repository: {full_url}\n\n")
+            f.write("=" * 80 + "\n")
+            f.write("SUMMARY\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(summary + "\n\n")
+            f.write("=" * 80 + "\n")
+            f.write("DIRECTORY TREE\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(tree + "\n\n")
+            f.write("=" * 80 + "\n")
+            f.write("CONTENT\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(content)
 
-# Load cache and initialize session_state defaults
-cache_values = load_cache()
-for k, v in cache_values.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+    return summary, tree, content
 
-# Top-level navigation
-nav = st.sidebar.radio("Navigation", ["Ingest", "Settings", "About", "Cache"])
 
-if nav == "Settings":
-    st.header("Settings")
-    st.markdown("Change GitHub token (stored in `.env`). The token will be available to ingestion calls.")
-    current_token = os.getenv("GITHUB_TOKEN", "")
-    token_input = st.text_input("GitHub Personal Access Token", value=current_token, type="password")
-    if st.button("Save token to .env"):
-        if token_input.strip() == "":
-            st.warning("Token is empty — nothing saved.")
-        else:
-            try:
-                save_token_to_env(token_input)
-                st.success("Token saved to .env and environment (GITHUB_TOKEN).")
-            except Exception as e:
-                st.error(f"Failed to save token: {e}")
-    st.markdown("---")
-    st.markdown("Detected ingestion backend:")
-    st.write(f"- ingest function available: {'Yes' if _ingest_func else 'No'}")
-    st.write(f"- RepoIngester class available: {'Yes' if _ingester_class else 'No'}")
-    st.info("This UI will prefer `ingest_repository` (from repo_ingest.py) then fallback to `RepoIngester` class.")
+# Main app
+def main():
+    st.title("🚀 Unified Server")
+    st.caption("Repository Extraction & Grammar Correction in One Place")
 
-elif nav == "About":
-    st.header("About")
-    st.markdown(
-        """
-        This Streamlit UI lets you ingest GitHub repositories using your project's ingestion functions.
-        Features:
-        - Enter repo URL, branch, subpath
-        - Choose output folder / name
-        - Save GitHub token to .env (token is not stored in the JSON cache)
-        - Generate and view resulting text digest
-        - Download the generated file
-        - Persistent cache for non-sensitive fields (stored in .repo_ingest_cache.json)
-        """
+    # Load cache
+    cache = load_cache()
+
+    # Sidebar for navigation
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio(
+        "Choose Feature",
+        ["🗂️ GitRepo Extractor", "✍️ Grammar Correction", "⚙️ Settings", "ℹ️ About"]
     )
-    st.markdown("---")
-    st.markdown("If your ingestion functions live in a different module name, please adjust the import in this app (`app.py`).")
 
-elif nav == "Cache":
-    st.header("Cache (persistent values)")
-    st.markdown("This cache stores non-sensitive fields so the form remembers them across restarts.")
-    st.write(json.dumps(load_cache(), indent=2))
-    if st.button("Clear cached values"):
-        clear_cache()
-        st.success("Cache cleared. Reload the app to see defaults.")
-    st.markdown("---")
-    st.markdown("Note: GitHub token is not cached here. Use Settings to save token to `.env`.")
+    # GitRepo Extractor Page
+    if page == "🗂️ GitRepo Extractor":
+        st.header("GitHub Repository Extractor")
+        st.write("Extract and analyze GitHub repositories into text format")
 
-else:
-    # Ingest page
-    st.header("Ingest repository")
-    col_left, col_right = st.columns([2, 1])
+        # Input fields
+        repo_url = st.text_input(
+            "Repository URL",
+            value=cache.get('repo_url', ''),
+            placeholder="https://github.com/user/repo",
+            help="Full GitHub repository URL"
+        )
 
-    with col_left:
-        repo_url = st.text_input("Repository URL", value=st.session_state.get("repo_url", DEFAULT_CACHE["repo_url"]), key="repo_url")
-        branch = st.text_input("Branch (leave empty for default/main)", value=st.session_state.get("branch", DEFAULT_CACHE["branch"]), key="branch")
-        subpath = st.text_input("Subpath (optional)", value=st.session_state.get("subpath", DEFAULT_CACHE["subpath"]), key="subpath")
-        token = st.text_input("GitHub Token (optional - overrides .env)", value=os.getenv("GITHUB_TOKEN", ""), type="password")
-        include_submodules = st.checkbox("Include submodules", value=st.session_state.get("include_submodules", False), key="include_submodules")
-        include_gitignored = st.checkbox("Include gitignored files", value=st.session_state.get("include_gitignored", False), key="include_gitignored")
-        max_file_size = st.number_input("Max file size per file (bytes, 0 for no limit)", value=st.session_state.get("max_file_size", 0), step=1, min_value=0, key="max_file_size")
-        st.markdown("**Output destination**")
-        output_folder = st.text_input("Output folder (will be created if missing)", value=st.session_state.get("output_folder", str(Path.cwd())), key="output_folder")
-        output_filename = st.text_input("Output filename (optional)", value=st.session_state.get("output_filename", ""), key="output_filename")
-        if output_filename.strip() == "":
-            preview_name = Path(repo_url.rstrip('/').split('/')[-1]) if repo_url else Path("repo")
-            parts = [preview_name.name]
-            if branch:
-                parts.append(branch)
-            if subpath:
-                parts.append(subpath.replace("/", "_"))
-            preview = "_".join([p for p in parts if p]) + "_digest.txt"
-            st.caption(f"Auto-generated if filename left blank: `{preview}`")
+        col1, col2 = st.columns(2)
 
-    with col_right:
-        st.markdown("### Actions")
-        generate = st.button("▶️ Generate", key="generate")
-        create_folder = st.button("📁 Create output folder", key="create_folder")
-        st.markdown("---")
-        st.markdown("Help & tips")
-        st.markdown("- Make sure `repo_ingest.py` or `repo_ingester.py` is in the same folder as this app.")
-        st.markdown("- If your repo is private, set the token either in Settings or in the token field above.")
-        st.markdown("- This runs synchronously — large repos can take some time.")
+        with col1:
+            branch = st.text_input(
+                "Branch (optional)",
+                value=cache.get('branch', ''),
+                placeholder="main",
+                help="Leave empty for default branch"
+            )
 
-    # Create output folder if asked
-    if create_folder:
-        try:
-            ensure_output_dir(output_folder)
-            # Save cache after creating folder
-            save_cache({
-                "repo_url": repo_url,
-                "branch": branch,
-                "subpath": subpath,
-                "output_folder": output_folder,
-                "output_filename": output_filename,
-                "include_submodules": include_submodules,
-                "include_gitignored": include_gitignored,
-                "max_file_size": max_file_size
-            })
-            st.success(f"Folder ready: {output_folder} (cache updated)")
-        except Exception as e:
-            st.error(f"Failed to create folder: {e}")
+        with col2:
+            subpath = st.text_input(
+                "Subpath (optional)",
+                value=cache.get('subpath', ''),
+                placeholder="src/api",
+                help="Specific directory within the repository"
+            )
 
-    # Perform generate
-    if generate:
-        st.info("Starting ingestion... logs will appear below.")
-        log_area = st.empty()
-        progress = st.progress(0)
+        output_folder = st.text_input(
+            "Output Folder",
+            value=cache.get('output_folder', './outputs'),
+            help="Where to save the generated files"
+        )
 
-        class Logger:
-            def __init__(self):
-                self._lines = []
-            def write(self, s):
-                if s is None:
-                    return
-                self._lines.append(str(s))
-                log_area.text("\n".join(self._lines))
-            def get_text(self):
-                return "\n".join(self._lines)
+        # Advanced options
+        with st.expander("Advanced Options"):
+            include_submodules = st.checkbox(
+                "Include Submodules",
+                value=cache.get('include_submodules', False)
+            )
 
-        logger = Logger()
+            max_file_size = st.number_input(
+                "Max File Size (bytes)",
+                value=cache.get('max_file_size', 1000000),
+                min_value=0,
+                help="Maximum size per file in bytes (0 for no limit)"
+            )
 
-        # validation
-        if not validate_repo_url(repo_url):
-            st.error("Repository URL must start with https://github.com/")
-        else:
-            try:
-                # ensure folder exists
-                out_dir = ensure_output_dir(output_folder)
-                if output_filename.strip():
-                    out_path = out_dir / output_filename
-                else:
-                    repo_name = repo_url.rstrip('/').split('/')[-1]
-                    parts = [repo_name]
-                    if branch:
-                        parts.append(branch)
-                    if subpath:
-                        parts.append(subpath.replace("/", "_"))
-                    out_path = out_dir / ("_".join([p for p in parts if p]) + "_digest.txt")
+        if st.button("🚀 Generate Repository Digest", type="primary"):
+            if not repo_url:
+                st.error("Please enter a repository URL")
+            else:
+                # Ensure output folder exists
+                os.makedirs(output_folder, exist_ok=True)
 
-                # Save cache (persist non-sensitive inputs)
-                save_cache({
-                    "repo_url": repo_url,
-                    "branch": branch,
-                    "subpath": subpath,
-                    "output_folder": output_folder,
-                    "output_filename": output_filename,
-                    "include_submodules": include_submodules,
-                    "include_gitignored": include_gitignored,
-                    "max_file_size": max_file_size
+                # Generate output filename
+                repo_name = repo_url.rstrip('/').split('/')[-1]
+                parts = [repo_name]
+                if branch:
+                    parts.append(branch)
+                if subpath:
+                    subpath_clean = subpath.replace('/', '_')
+                    parts.append(subpath_clean)
+                output_file = os.path.join(output_folder, "_".join(parts) + "_digest.txt")
+
+                # Save cache
+                cache.update({
+                    'repo_url': repo_url,
+                    'branch': branch,
+                    'subpath': subpath,
+                    'output_folder': output_folder,
+                    'include_submodules': include_submodules,
+                    'max_file_size': max_file_size
                 })
+                save_cache(cache)
 
-                progress.progress(5)
-                logger.write(f"Using output file: {out_path}\n")
-                # override environment token if provided
-                if token:
-                    os.environ["GITHUB_TOKEN"] = token
-                    logger.write("Using token from UI (overrides .env)\n")
-                else:
-                    tkn = os.getenv("GITHUB_TOKEN")
-                    if tkn:
-                        logger.write("Using token from environment (.env)\n")
-                progress.progress(10)
-
-                # call available backend
-                result = None
-                if _ingest_func:
-                    logger.write("Detected ingestion function. Calling it...\n")
-                    result = run_ingest_using_function(_ingest_func, repo_url, token or os.getenv("GITHUB_TOKEN", None), subpath or None, branch or None, str(out_path), include_submodules, include_gitignored, None if max_file_size == 0 else max_file_size, logger)
-                elif _ingester_class:
-                    logger.write("Detected RepoIngester class. Instantiating and calling...\n")
-                    result = run_ingest_using_class(_ingester_class, repo_url, token or os.getenv("GITHUB_TOKEN", None), subpath or None, branch or None, str(out_path), include_submodules, include_gitignored, None if max_file_size == 0 else max_file_size, logger)
-                else:
-                    st.error("No ingestion backend detected. Place `repo_ingest.py` or `repo_ingester.py` in the same folder and restart the app.")
-                    raise RuntimeError("No ingestion backend available")
-
-                progress.progress(80)
-                logger.write("Ingestion call finished. Preparing output preview...\n")
-
-                # If the backend returned tuple (summary, tree, content) we can also display & write file if missing
-                if isinstance(result, tuple) and len(result) >= 3:
-                    summary, tree, content = result[:3]
-                    if not out_path.exists():
-                        logger.write("Backend didn't write output file — writing file from returned content...\n")
-                        with open(out_path, "w", encoding="utf-8") as f:
-                            f.write("="*80 + "\nREPOSITORY DIGEST\n" + "="*80 + "\n\n")
-                            f.write(f"Repository: {repo_url}\n\n")
-                            f.write("="*80 + "\nSUMMARY\n" + "="*80 + "\n\n")
-                            f.write(summary + "\n\n")
-                            f.write("="*80 + "\nDIRECTORY TREE\n" + "="*80 + "\n\n")
-                            f.write(tree + "\n\n")
-                            f.write("="*80 + "\nCONTENT\n" + "="*80 + "\n\n")
-                            f.write(content)
-                    preview_text = ""
+                # Perform ingestion
+                with st.spinner("Processing repository..."):
                     try:
-                        preview_text = out_path.read_text(encoding="utf-8")
+                        summary, tree, content = ingest_repository(
+                            repo_url=repo_url,
+                            subpath=subpath if subpath else None,
+                            branch=branch if branch else None,
+                            output_file=output_file,
+                            include_submodules=include_submodules,
+                            max_file_size=max_file_size if max_file_size > 0 else None
+                        )
+
+                        st.success(f"✅ Successfully generated repository digest!")
+                        st.info(f"📄 Output saved to: {output_file}")
+
+                        # Display results
+                        st.subheader("Summary")
+                        st.text(summary)
+
+                        st.subheader("Directory Tree")
+                        st.code(tree, language="text")
+
+                        # Download button
+                        with open(output_file, 'r', encoding='utf-8') as f:
+                            file_content = f.read()
+
+                        st.download_button(
+                            label="📥 Download Digest",
+                            data=file_content,
+                            file_name=os.path.basename(output_file),
+                            mime="text/plain"
+                        )
+
                     except Exception as e:
-                        preview_text = f"(Failed to read output file: {e})"
-                else:
-                    # backend may have already written file; try to read
+                        st.error(f"❌ Error: {str(e)}")
+
+    # Grammar Correction Page
+    elif page == "✍️ Grammar Correction":
+        st.header("LinguaFix - Grammar Correction")
+        st.write("Perfect your writing with AI-powered grammar correction")
+
+        # Check if API key is set
+        if not os.getenv('GEMINI_API_KEY'):
+            st.warning("⚠️ Gemini API key not set. Please configure it in Settings.")
+
+        sentence = st.text_area(
+            "Enter text to correct",
+            value=cache.get('last_sentence', ''),
+            placeholder="Enter a sentence to correct, for example: 'he walk to the store yesteday.'",
+            height=150,
+            help="Type or paste the text you want to correct"
+        )
+
+        if st.button("✨ Fix Grammar", type="primary"):
+            if not sentence or len(sentence.strip()) < 3:
+                st.error("Please enter a sentence with at least 3 characters.")
+            elif not os.getenv('GEMINI_API_KEY'):
+                st.error("Please set your Gemini API key in Settings.")
+            else:
+                # Save to cache
+                cache['last_sentence'] = sentence
+                save_cache(cache)
+
+                with st.spinner("Correcting grammar with retry logic..."):
                     try:
-                        preview_text = out_path.read_text(encoding="utf-8")
+                        # Initialize grammar corrector
+                        corrector = GrammarCorrector()
+
+                        # Correct the sentence
+                        result = corrector.correct(sentence)
+
+                        if result["success"]:
+                            st.success("✅ Grammar corrected!")
+
+                            col1, col2 = st.columns(2)
+
+                            with col1:
+                                st.subheader("Original")
+                                st.info(result["original"])
+
+                            with col2:
+                                st.subheader("Corrected")
+                                st.success(result["corrected"])
+                        else:
+                            st.error(f"❌ {result['error']}")
+
+                    except GrammarCorrectionError as e:
+                        st.error(f"❌ Grammar correction failed: {str(e)}")
                     except Exception as e:
-                        preview_text = f"(No readable output file at {out_path}: {e})"
+                        st.error(f"❌ Unexpected error: {str(e)}")
 
-                progress.progress(95)
-                logger.write("Done.\n")
-                progress.progress(100)
+    # Settings Page
+    elif page == "⚙️ Settings":
+        st.header("Settings")
+        st.write("Configure API keys and preferences")
 
-                # Show results
-                st.success("Ingestion complete.")
-                st.markdown(f"**Output file:** `{out_path}`")
-                try:
-                    st.download_button("⬇️ Download output", data=preview_text.encode("utf-8"), file_name=out_path.name, mime="text/plain")
-                except Exception:
-                    st.warning("Download not available (large content?). You can open the file directly from disk.")
+        # GitHub Token
+        st.subheader("GitHub Token")
+        st.write("Required for private repositories and higher rate limits")
 
-                # Text viewer with folding / large content handling
-                with st.expander("View output text", expanded=True):
-                    max_preview_chars = 200_000
-                    if len(preview_text) > max_preview_chars:
-                        st.warning("Output is large — showing beginning and end. Use download to get full file.")
-                        st.text(preview_text[:100000])
-                        st.markdown("---")
-                        st.text(preview_text[-100000:])
-                    else:
-                        st.text(preview_text)
+        current_token = os.getenv('GITHUB_TOKEN', '')
+        github_token = st.text_input(
+            "GitHub Personal Access Token",
+            value=current_token[:10] + "..." if current_token else "",
+            type="password",
+            help="Get from https://github.com/settings/personal-access-tokens"
+        )
 
-            except Exception as e:
-                tb = traceback.format_exc()
-                st.error(f"Ingestion failed: {e}")
-                st.code(tb)
-                logger.write(f"Exception:\n{tb}\n")
+        if st.button("Save GitHub Token"):
+            if github_token:
+                save_github_token(github_token)
+                st.success("✅ GitHub token saved successfully!")
+                st.rerun()
+            else:
+                st.error("Please enter a valid token")
+
+        st.divider()
+
+        # Gemini API Key
+        st.subheader("Gemini API Key")
+        st.write("Required for grammar correction feature")
+
+        current_key = os.getenv('GEMINI_API_KEY', '')
+        gemini_key = st.text_input(
+            "Gemini API Key",
+            value=current_key[:10] + "..." if current_key else "",
+            type="password",
+            help="Get from https://aistudio.google.com/apikey"
+        )
+
+        if st.button("Save Gemini API Key"):
+            if gemini_key:
+                save_gemini_key(gemini_key)
+                st.success("✅ Gemini API key saved successfully!")
+                st.rerun()
+            else:
+                st.error("Please enter a valid API key")
+
+        st.divider()
+
+        # Cache management
+        st.subheader("Cache Management")
+        if st.button("🗑️ Clear Cache"):
+            if os.path.exists(CACHE_FILE):
+                os.remove(CACHE_FILE)
+                st.success("Cache cleared!")
+                st.rerun()
+
+    # About Page
+    elif page == "ℹ️ About":
+        st.header("About Unified Server")
+
+        st.markdown("""
+        ### 🚀 Features
+        
+        **GitRepo Extractor**
+        - Extract entire GitHub repositories or specific directories
+        - Support for public and private repositories
+        - Branch-specific ingestion
+        - Configurable file size limits
+        - Generates comprehensive text digests
+        
+        **LinguaFix Grammar Correction**
+        - AI-powered grammar correction using Google Gemini
+        - **Retry logic with exponential backoff** for rate limit handling
+        - Real-time text analysis
+        - Simple and intuitive interface
+        - Robust error handling
+        
+        ### 🔧 Technologies
+        - **Streamlit** - Web interface
+        - **gitingest** - Repository extraction
+        - **Google Generative AI** - AI operations
+        - **Python** - Backend processing
+        - **Modular Architecture** - Separate grammar_corrector.py module
+        
+        ### ⚡ Rate Limit Handling
+        
+        The grammar corrector includes:
+        - **Exponential backoff** - Progressively increases wait time
+        - **Jitter** - Random variation to prevent synchronized retries
+        - **3 retry attempts** - Automatic retry on rate limit errors
+        - **Clear error messages** - Helpful feedback on quota issues
+        
+        ### 📝 Usage Tips
+        
+        1. **For Repository Extraction:**
+           - Get a GitHub token from Settings for private repos
+           - Use subpath to extract specific directories
+           - Specify branch for version-specific extraction
+        
+        2. **For Grammar Correction:**
+           - Configure Gemini API key in Settings
+           - Enter text and click "Fix Grammar"
+           - If rate limited, wait a moment and retry
+           - Check quota at https://aistudio.google.com/
+        
+        ### 🔐 Privacy & Security
+        - All API keys are stored locally in `.env` file
+        - No data is sent to external servers except AI APIs
+        - Cache is stored locally for convenience
+        
+        ### 🌟 Resource Optimization
+        This unified server runs both features on a single local instance,
+        optimizing system resources and simplifying management.
+        """)
+
+
+if __name__ == "__main__":
+    main()
