@@ -298,21 +298,33 @@ class ScriptRunner:
 
         # Ensure collection exists
         if collection not in self.collection_manager.list_collections():
+            print(f"Collection '{collection}' not found!")
             return False
 
         # Sanitize name to prevent path traversal
         clean_name = "".join(c for c in name if c.isalnum() or c in ('-', '_')).strip()
         if not clean_name:
+            print(f"Invalid script name: '{name}'")
             return False
 
         filename = f"{clean_name}.py"
-        file_path = self.base_path / collection / filename
+
+        # Ensure collection directory exists
+        collection_dir = self.base_path / collection
+        collection_dir.mkdir(parents=True, exist_ok=True)
+
+        file_path = collection_dir / filename
 
         # Write code to file
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(code)
-        except IOError:
+            print(f"Successfully saved to: {file_path}")
+        except IOError as e:
+            print(f"Failed to save file: {e}")
+            return False
+        except Exception as e:
+            print(f"Unexpected error saving file: {e}")
             return False
 
         # Update metadata
