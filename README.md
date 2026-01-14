@@ -1,13 +1,14 @@
-# 🧠 GitHub Repository Ingestion Suite
+# 🚀 Unified Server
 
-A powerful Python-based toolkit to **extract and analyze GitHub repositories** using [`gitingest`](https://pypi.org/project/gitingest/).
-It supports both **CLI** and a **Streamlit-based graphical interface** for convenient repository ingestion, documentation generation, and LLM-ready text conversion.
+A powerful all-in-one Streamlit application that combines **GitHub Repository Extraction**, **AI-Powered Grammar Correction**, and **Python Script Runner** with a modern, professional interface.
+
+Perfect for developers who want repository analysis, writing assistance, and a sandboxed Python playground - all in one unified platform.
 
 ---
 
 ## 🚀 Features
 
-### 🧰 Core (CLI)
+### 🗂️ GitRepo Extractor
 
 * 🔐 Works with **public and private repositories** (via GitHub token)
 * 🌳 Supports **branch-wise ingestion**
@@ -25,14 +26,36 @@ It supports both **CLI** and a **Streamlit-based graphical interface** for conve
   * Summary
   * Full content
 
-### 💡 Streamlit UI
+### ✍️ LinguaFix Grammar Correction (Enhanced!)
 
-* 🎨 Clean web interface (runs locally)
-* ⚙️ Settings page for **GitHub token management**
+* ✨ **AI-powered grammar correction** using Google Gemini 2.5 Flash
+* 📄 **Supports long text and paragraphs** (up to 5000 characters)
+* 🔄 Smart retry logic with exponential backoff for rate limiting
+* 📊 Real-time character count
+* 💾 Download corrected text
+* 🎨 Side-by-side comparison view (Original vs Corrected)
+* 🚀 Robust error handling with helpful feedback
+
+### 🐍 Python Script Runner (Modernized!)
+
+* 🎨 **Professional code editor** with syntax highlighting powered by Ace Editor
+* ⌨️ **VSCode-like keyboard shortcuts** and features
+* 🎯 **Smart autocompletion** and code snippets
+* 📦 **Collection management** - organize scripts like Postman collections
+* 🔍 **Search functionality** - find scripts by name or tags
+* 📝 **Script tagging** for better organization
+* 🔒 **Secure sandboxed execution** environment
+* 📊 Captures stdout, stderr, and return values
+* 💾 Export execution results
+* 🕒 Recent scripts quick access
+
+### 💡 Modern UI Features
+
+* 🎨 Custom dark theme with professional styling
 * 🧠 Persistent **cache** remembers last used values
-* 🧾 View generated text directly in the browser
-* 💾 Download output directly
-* 📁 Select or auto-create output folder
+* 🧾 View results directly in the browser
+* 💾 Download outputs
+* ⚙️ Settings page for **API key management**
 * ✅ Windows-compatible (Proactor event loop fix applied)
 
 ---
@@ -65,10 +88,14 @@ pip install -r requirements.txt
 * `gitingest` — Core ingestion library
 * `streamlit` — Web UI framework
 * `python-dotenv` — Environment variable management
+* `google-generativeai` — AI grammar correction
+* `streamlit-code-editor` — Modern code editor component
 
 ---
 
-## 🔑 Setup GitHub Token
+## 🔑 Setup API Keys
+
+### GitHub Token (for GitRepo Extractor)
 
 For **private repositories**, you must use a GitHub Personal Access Token.
 
@@ -90,11 +117,25 @@ set GITHUB_TOKEN=ghp_xxxxx    # Windows
 export GITHUB_TOKEN=ghp_xxxxx # Mac/Linux
 ```
 
-### Option 3: CLI flag
+### Option 3: Use Settings page in UI
+
+Navigate to **Settings** in the app and enter your GitHub token.
+
+### Gemini API Key (for Grammar Correction)
+
+For **grammar correction**, you need a Google Gemini API key:
+
+1. Visit [Google AI Studio](https://aistudio.google.com/apikey)
+2. Click **"Get API Key"** or **"Create API Key"**
+3. Copy the API key
+
+**Add to `.env`:**
 
 ```bash
-python repo_ingest.py https://github.com/user/repo --token ghp_xxxxx
+GEMINI_API_KEY=your_api_key_here
 ```
+
+**Or use Settings page in UI** to configure it.
 
 ---
 
@@ -171,7 +212,7 @@ python repo_ingest.py "https://github.com/MrAk47Anand007/QuickComm---Hyperlocal-
 
 ## 💻 Streamlit Web UI
 
-You can also run a **beautiful GUI** with caching and live preview.
+Launch the **modern unified interface** with all features in one place.
 
 ### 🧩 Launch the App
 
@@ -179,14 +220,34 @@ You can also run a **beautiful GUI** with caching and live preview.
 streamlit run app.py
 ```
 
+The app will open in your browser at `http://localhost:8501`
+
 ### 🔧 Features in UI
 
-| Section         | Functionality                                                       |
-| --------------- | ------------------------------------------------------------------- |
-| **Ingest Page** | Enter repo URL, branch, subpath, output folder, and generate output |
-| **Settings**    | Manage GitHub token (`.env` stored)                                 |
-| **Cache**       | View or clear saved field values                                    |
-| **About**       | Learn about the tool and backend logic                              |
+| Section                | Functionality                                                              |
+| ---------------------- | -------------------------------------------------------------------------- |
+| **🗂️ GitRepo Extractor** | Extract GitHub repositories with advanced options                          |
+| **✍️ Grammar Correction** | AI-powered text correction with side-by-side comparison                    |
+| **🐍 Script Runner**      | Write, organize, and execute Python scripts with a professional code editor |
+| **⚙️ Settings**           | Manage GitHub token and Gemini API key (saved to `.env`)                   |
+| **ℹ️ About**              | Learn about features and technologies                                      |
+
+### 🐍 Using the Python Script Runner
+
+1. **Create Collections**: Organize your scripts into collections (like folders)
+2. **Write Code**: Use the modern code editor with syntax highlighting and autocomplete
+3. **Add Metadata**: Give your scripts names, descriptions, and tags
+4. **Execute**: Run scripts in a secure sandbox environment
+5. **View Results**: See stdout, stderr, execution time, and return values
+6. **Export**: Download execution results as text files
+
+**Features:**
+- Line numbers and syntax highlighting
+- Code folding and auto-indentation
+- VSCode-like keyboard shortcuts (Ctrl+/, Ctrl+D, etc.)
+- Search and replace within code
+- Multiple script collections for organization
+- Tag-based script filtering
 
 ### 🗂 Persistent Cache
 
@@ -219,37 +280,51 @@ repo_name_dev_backend_digest.txt
 
 ## 🧪 Example Use Cases
 
-| Use Case         | Description                                                  |
-| ---------------- | ------------------------------------------------------------ |
-| 🤖 LLM Training  | Convert repo code into structured text for context ingestion |
-| 📚 Documentation | Automatically generate repository summaries and structure    |
-| 🧮 Analysis      | Extract and analyze code structure for audits or metrics     |
-| 🧑‍💻 Research   | Study project patterns or architecture easily                |
+| Use Case                     | Description                                                       |
+| ---------------------------- | ----------------------------------------------------------------- |
+| 🤖 LLM Training              | Convert repo code into structured text for context ingestion      |
+| 📚 Documentation             | Automatically generate repository summaries and structure         |
+| 🧮 Code Analysis             | Extract and analyze code structure for audits or metrics          |
+| 🧑‍💻 Research                | Study project patterns or architecture easily                     |
+| ✍️ Content Writing           | Polish blog posts, emails, and documentation with AI              |
+| 📝 Academic Writing          | Improve grammar in research papers and essays                     |
+| 🧪 Quick Prototyping         | Test Python code snippets without setting up an environment       |
+| 📚 Learning Python           | Practice coding with instant feedback and safe execution          |
+| 🔬 Algorithm Testing         | Develop and test algorithms with organized script collections     |
+| 🛠️ Utility Scripts           | Store and manage frequently used Python utilities                 |
 
 ---
 
 ## 🩺 Troubleshooting
 
-| Issue                                                                           | Solution                                                                  |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| **`NotImplementedError` from asyncio**                                          | Windows fix applied — ensure Proactor policy is set (already in `app.py`) |
-| **"Repository URL must start with [https://github.com/](https://github.com/)"** | Use HTTPS link (not SSH)                                                  |
-| **Private repo access denied**                                                  | Check token permissions (`repo` scope)                                    |
-| **Output path not found**                                                       | Ensure folder exists or use `--output` to specify valid directory         |
-| **Large repo takes long**                                                       | Use `--subpath` or limit file size with `--max-file-size`                 |
+| Issue                                    | Solution                                                                  |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
+| **`NotImplementedError` from asyncio**   | Windows fix applied — ensure Proactor policy is set (already in `app.py`) |
+| **Private repo access denied**           | Check token permissions (`repo` scope)                                    |
+| **Grammar correction rate limited**      | Wait a moment and retry; check quota at Google AI Studio                  |
+| **Script execution timeout**             | Default timeout is 30s; avoid infinite loops                              |
+| **Code editor not loading**              | Clear browser cache or try incognito mode                                 |
+| **Import errors in script runner**       | Some modules are blocked for security (os, sys, subprocess, etc.)         |
 
 ---
 
 ## 🧱 Folder Structure
 
 ```
-GitRepoExtracter/
+Unified-Server/
 │
-├── repo_ingest.py           # CLI ingestion tool (main entry point)
-├── repo_ingester.py         # Library version (programmatic API)
-├── app.py                   # Streamlit UI (with caching + settings)
-├── .env                     # GitHub token (optional)
-├── .repo_ingest_cache.json  # Cached UI values (auto-created)
+├── app.py                        # Main Streamlit application
+├── script_runner.py              # Python Script Runner module
+├── grammar_corrector.py          # Grammar correction module
+├── repo_ingest.py                # CLI ingestion tool
+├── repo_ingester.py              # Library version (programmatic API)
+├── .env                          # API keys and tokens
+├── .streamlit/
+│   └── config.toml               # Streamlit theme configuration
+├── scripts/                      # User scripts storage
+│   ├── Uncategorized/            # Default collection
+│   └── collections.json          # Collections metadata
+├── .unified_server_cache.json    # Cached UI values (auto-created)
 ├── requirements.txt
 └── README.md
 ```

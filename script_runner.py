@@ -18,6 +18,15 @@ from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
 
+# Module-level safe_import function for multiprocessing compatibility
+def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+    """Restricted import function that blocks dangerous modules"""
+    blocked_modules = ['os', 'sys', 'subprocess', 'shutil', 'builtins', 'pathlib', 'importlib']
+    if name in blocked_modules or (fromlist and any(m in blocked_modules for m in fromlist)):
+        raise ImportError(f"Import of '{name}' is not allowed for security reasons")
+    return __import__(name, globals, locals, fromlist, level)
+
+
 class CollectionManager:
     """Manages script collections and file storage"""
 
@@ -189,12 +198,7 @@ class ScriptExecutor:
         manager = multiprocessing.Manager()
         return_dict = manager.dict()
 
-        # Restricted globals
-        def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
-            if name in ['os', 'sys', 'subprocess', 'shutil', 'builtins']:
-                 raise ImportError(f"Import of '{name}' is not allowed")
-            return __import__(name, globals, locals, fromlist, level)
-
+        # Restricted globals - using module-level safe_import
         safe_globals = {
             '__builtins__': {
                 'print': print,

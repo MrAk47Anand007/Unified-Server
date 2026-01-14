@@ -4,3 +4,4 @@ python-dotenv>=1.0.0
 genkit
 genkit-plugin-google-genai
 google-generativeai>=0.3.0
+streamlit-code-editor>=0.1.19
