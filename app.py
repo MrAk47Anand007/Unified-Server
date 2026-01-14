@@ -626,8 +626,11 @@ def main():
             # Generate unique key based on script identity to force reload
             script_key = f"{st.session_state.current_script['collection']}_{st.session_state.current_script.get('original_name', 'new')}_{st.session_state.get('editor_refresh_counter', 0)}"
 
+            # Get current code from session state
+            current_code = st.session_state.current_script.get("code", "")
+
             response_dict = code_editor(
-                st.session_state.current_script["code"],
+                current_code,
                 lang="python",
                 height=[25, 35],  # min, max rows - taller for better coding
                 theme="contrast",  # Modern dark theme
@@ -655,7 +658,7 @@ def main():
             if response_dict and "text" in response_dict:
                 script_code = response_dict["text"]
             else:
-                script_code = st.session_state.current_script["code"]
+                script_code = current_code
 
             # Compact input section
             st.markdown("**📥 Input (stdin)**")
@@ -668,37 +671,48 @@ def main():
             )
 
         with output_col:
-            st.markdown("**📊 Output**")
+            st.markdown("**📊 Output Terminal**")
 
-            # Output section
-            if "last_result" in st.session_state:
-                result = st.session_state.last_result
+            # Output section with container for better visibility
+            output_container = st.container()
 
-                # Status indicators
-                status_col1, status_col2 = st.columns(2)
-                with status_col1:
-                    if result["success"]:
-                        st.success("✅ Success")
-                    else:
-                        st.error("❌ Failed")
-                with status_col2:
-                    st.info(f"⏱️ {result['execution_time']:.4f}s")
+            with output_container:
+                if "last_result" in st.session_state:
+                    result = st.session_state.last_result
 
-                # Output display
-                if result["stdout"]:
-                    st.text("Standard Output:")
-                    st.code(result["stdout"], language="text")
+                    # Status indicators
+                    status_col1, status_col2 = st.columns(2)
+                    with status_col1:
+                        if result.get("success"):
+                            st.success("✅ Success", icon="✅")
+                        else:
+                            st.error("❌ Failed", icon="❌")
+                    with status_col2:
+                        exec_time = result.get("execution_time", 0)
+                        st.info(f"⏱️ {exec_time:.4f}s", icon="⏱️")
 
-                if result["stderr"]:
-                    st.text("Error Output:")
-                    st.code(result["stderr"], language="text")
+                    st.markdown("---")
 
-                if result.get("error"):
-                    st.error(f"Error: {result['error']}")
+                    # Output display with better visibility
+                    stdout_content = result.get("stdout", "")
+                    stderr_content = result.get("stderr", "")
+                    error_content = result.get("error", None)
+                    return_value = result.get("result", None)
 
-                if result.get("result") is not None:
-                    st.text("Return Value:")
-                    st.write(result["result"])
+                    if stdout_content:
+                        st.markdown("**📤 Standard Output:**")
+                        st.code(stdout_content, language="text")
+
+                    if stderr_content:
+                        st.markdown("**⚠️ Error Output:**")
+                        st.code(stderr_content, language="text")
+
+                    if error_content:
+                        st.error(f"**💥 Error:** {error_content}")
+
+                    if return_value is not None:
+                        st.markdown("**↩️ Return Value:**")
+                        st.code(str(return_value), language="python")
 
                 # Download output
                 output_content = f"""Execution Report
@@ -718,23 +732,26 @@ Execution Time: {result['execution_time']:.4f}s
 --- ERROR ---
 {result.get('error', 'None')}
 """
-                st.download_button(
-                    label="📥 Download",
-                    data=output_content,
-                    file_name=f"output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain",
-                    use_container_width=True
-                )
-            else:
-                st.info("👉 Run a script to see output here")
-                st.markdown("---")
-                st.markdown("""
-                **Quick Tips:**
-                - Use `print()` for output
-                - Access stdin via text area below
-                - Check execution time and errors
-                - Download results as needed
-                """)
+                    st.markdown("---")
+                    st.download_button(
+                        label="📥 Download Output",
+                        data=output_content,
+                        file_name=f"output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+                else:
+                    # No output yet - show helpful message
+                    st.info("👉 Click **Run** to execute your script", icon="▶️")
+                    st.markdown("---")
+                    st.markdown("""
+                    **Terminal Ready:**
+                    - Write your Python code in the editor
+                    - Click the ▶️ Run button
+                    - Watch output appear here in real-time
+                    - Use `print()` for output
+                    - Provide input via stdin box
+                    """)
 
         # Update session state with edits
         st.session_state.current_script["name"] = script_name
@@ -752,42 +769,77 @@ Execution Time: {result['execution_time']:.4f}s
                 orig_name = st.session_state.current_script.get("original_name")
                 orig_col = st.session_state.current_script.get("original_collection")
 
-                if runner.save_script(
+                # Update session state code before saving
+                st.session_state.current_script["code"] = script_code
+
+                save_result = runner.save_script(
                     script_name,
                     script_code,
                     selected_collection,
                     script_desc,
                     st.session_state.current_script["tags"]
-                ):
+                )
+
+                if save_result:
                     # Get the saved path
                     clean_name = "".join(c for c in script_name if c.isalnum() or c in ('-', '_')).strip()
                     saved_path = f"./scripts/{selected_collection}/{clean_name}.py"
 
-                    # If successful save, check if we need to delete the old one
-                    if orig_name and orig_col:
-                        if orig_name != script_name or orig_col != selected_collection:
-                            runner.delete_script(orig_name, orig_col)
-                            st.success(f"✅ Moved script from `{orig_col}/{orig_name}` to `{selected_collection}/{script_name}`\n\n📁 Saved at: `{saved_path}`")
+                    # Verify file was actually created
+                    import os
+                    if os.path.exists(saved_path):
+                        file_size = os.path.getsize(saved_path)
+
+                        # If successful save, check if we need to delete the old one
+                        if orig_name and orig_col:
+                            if orig_name != script_name or orig_col != selected_collection:
+                                runner.delete_script(orig_name, orig_col)
+                                st.success(f"✅ Moved script from `{orig_col}/{orig_name}` to `{selected_collection}/{script_name}`\n\n📁 Saved at: `{saved_path}` ({file_size} bytes)")
+                        else:
+                            st.success(f"✅ Script saved successfully!\n\n📁 Location: `{saved_path}`\n💾 Size: {file_size} bytes")
+
+                        # Update state to reflect new identity
+                        st.session_state.current_script["original_name"] = script_name
+                        st.session_state.current_script["original_collection"] = selected_collection
+                        st.session_state.current_script["name"] = script_name
+                        st.session_state.current_script["collection"] = selected_collection
+
+                        # Increment refresh counter to force editor reload
+                        st.session_state.editor_refresh_counter = st.session_state.get('editor_refresh_counter', 0) + 1
+
+                        time.sleep(1.5)  # Show message briefly
+                        st.rerun()
                     else:
-                        st.success(f"✅ Saved `{script_name}` to collection `{selected_collection}`\n\n📁 Path: `{saved_path}`")
-
-                    # Update state to reflect new identity
-                    st.session_state.current_script["original_name"] = script_name
-                    st.session_state.current_script["original_collection"] = selected_collection
-
-                    # Increment refresh counter to force editor reload
-                    st.session_state.editor_refresh_counter = st.session_state.get('editor_refresh_counter', 0) + 1
-
-                    time.sleep(1.5)  # Show message briefly
-                    st.rerun()
+                        st.error(f"❌ Save reported success but file not found at: `{saved_path}`")
                 else:
-                    st.error("❌ Failed to save script")
+                    st.error(f"❌ Failed to save script to collection '{selected_collection}'. Check if collection exists.")
 
         if run_clicked:
-            with st.spinner("⚙️ Executing..."):
-                result = runner.execute_script(script_code, script_input)
-                st.session_state.last_result = result
-                st.rerun()
+            # Show live execution feedback
+            with st.spinner("⚙️ Executing script... Please wait"):
+                try:
+                    # Execute the script
+                    result = runner.execute_script(script_code, script_input)
+                    st.session_state.last_result = result
+
+                    # Show immediate feedback
+                    if result.get("success"):
+                        st.toast("✅ Script executed successfully!", icon="✅")
+                    else:
+                        st.toast("❌ Script execution failed", icon="❌")
+
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Execution error: {str(e)}")
+                    st.session_state.last_result = {
+                        "success": False,
+                        "stdout": "",
+                        "stderr": str(e),
+                        "error": f"Execution failed: {str(e)}",
+                        "result": None,
+                        "execution_time": 0
+                    }
+                    st.rerun()
 
         if delete_clicked:
             current_script_name = st.session_state.current_script["name"]
