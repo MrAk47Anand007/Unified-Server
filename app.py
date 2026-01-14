@@ -7,6 +7,7 @@ Uses modular grammar corrector with retry logic and proper error handling
 import os
 import sys
 import asyncio
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 from datetime import datetime
@@ -401,8 +402,8 @@ def main():
 
     # Script Runner Page
     elif page == "🐍 Script Runner":
-        st.header("🐍 Python Script Runner")
-        st.write("Run and organize your Python scripts")
+        # Compact header
+        st.markdown("### 🐍 Python Script Runner")
 
         # Initialize Script Runner
         runner = ScriptRunner()
@@ -431,8 +432,15 @@ def main():
                         "code": loaded["code"],
                         "collection": s["collection"],
                         "description": loaded["metadata"].get("description", ""),
-                        "tags": loaded["metadata"].get("tags", [])
+                        "tags": loaded["metadata"].get("tags", []),
+                        "original_name": loaded["metadata"]["name"],
+                        "original_collection": s["collection"]
                     }
+                    # Clear output
+                    if "last_result" in st.session_state:
+                        del st.session_state.last_result
+                    # Increment refresh counter to force editor reload
+                    st.session_state.editor_refresh_counter = st.session_state.get('editor_refresh_counter', 0) + 1
                     st.rerun()
 
         st.sidebar.markdown("---")
@@ -501,6 +509,11 @@ def main():
                         "original_name": None,
                         "original_collection": None
                     }
+                    # Clear output
+                    if "last_result" in st.session_state:
+                        del st.session_state.last_result
+                    # Increment refresh counter to force editor reload
+                    st.session_state.editor_refresh_counter = st.session_state.get('editor_refresh_counter', 0) + 1
                     st.rerun()
 
                 for s in col_scripts:
@@ -520,6 +533,11 @@ def main():
                                 "original_name": loaded["metadata"]["name"],
                                 "original_collection": col_name
                             }
+                            # Clear output when switching scripts
+                            if "last_result" in st.session_state:
+                                del st.session_state.last_result
+                            # Increment refresh counter to force editor reload
+                            st.session_state.editor_refresh_counter = st.session_state.get('editor_refresh_counter', 0) + 1
                             # Update Cache
                             sr_cache = cache.get('script_runner', {})
                             sr_cache['last_collection'] = col_name
@@ -546,19 +564,34 @@ def main():
         # Helper to determine if we are editing a new or existing script
         is_new_script = not st.session_state.current_script["name"]
 
-        if is_new_script:
-            st.subheader(f"📝 New Script in {st.session_state.current_script['collection']}")
-        else:
-            st.subheader(f"📝 Editing: {st.session_state.current_script['name']}")
+        # Compact title and action buttons at top
+        col_title, col_actions = st.columns([2, 3])
+        with col_title:
+            if is_new_script:
+                st.markdown(f"**📝 New Script** in *{st.session_state.current_script['collection']}*")
+            else:
+                st.markdown(f"**📝 {st.session_state.current_script['name']}**")
 
-        # Editor Section
-        col_meta1, col_meta2 = st.columns(2)
+        with col_actions:
+            # Action buttons in one row at the top
+            btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
+            with btn_col1:
+                save_clicked = st.button("💾 Save", use_container_width=True)
+            with btn_col2:
+                run_clicked = st.button("▶️ Run", type="primary", use_container_width=True)
+            with btn_col3:
+                delete_clicked = st.button("🗑️ Delete", use_container_width=True)
+            with btn_col4:
+                clear_output_clicked = st.button("🧹 Clear Output", use_container_width=True)
+
+        st.markdown("---")
+
+        # Metadata section - more compact
+        col_meta1, col_meta2, col_meta3, col_meta4 = st.columns([2, 2, 1.5, 2.5])
         with col_meta1:
-            script_name = st.text_input("Script Name", value=st.session_state.current_script["name"])
+            script_name = st.text_input("Name", value=st.session_state.current_script["name"], label_visibility="collapsed", placeholder="Script Name")
         with col_meta2:
-            script_tags = st.text_input("Tags (comma separated)", value=",".join(st.session_state.current_script["tags"]))
-
-        col_meta3, col_meta4 = st.columns(2)
+            script_tags = st.text_input("Tags", value=",".join(st.session_state.current_script["tags"]), label_visibility="collapsed", placeholder="Tags (comma separated)")
         with col_meta3:
             # Collection Dropdown (Assignment)
             current_col_idx = 0
@@ -569,197 +602,106 @@ def main():
                 "Collection",
                 collections,
                 index=current_col_idx,
-                help="Move script to another collection by changing this and saving"
+                label_visibility="collapsed"
+            )
+        with col_meta4:
+            script_desc = st.text_input("Description", value=st.session_state.current_script["description"], label_visibility="collapsed", placeholder="Description")
+
+        # VS Code-like layout: Editor on left, Output on right
+        editor_col, output_col = st.columns([1.2, 1])
+
+        with editor_col:
+            st.markdown("**💻 Code Editor**")
+
+            # Configure code editor with modern features
+            editor_btns = [{
+                "name": "Copy",
+                "feather": "Copy",
+                "hasText": True,
+                "alwaysOn": True,
+                "commands": ["copyAll"],
+                "style": {"top": "0.46rem", "right": "0.4rem"}
+            }]
+
+            # Generate unique key based on script identity to force reload
+            script_key = f"{st.session_state.current_script['collection']}_{st.session_state.current_script.get('original_name', 'new')}_{st.session_state.get('editor_refresh_counter', 0)}"
+
+            response_dict = code_editor(
+                st.session_state.current_script["code"],
+                lang="python",
+                height=[25, 35],  # min, max rows - taller for better coding
+                theme="contrast",  # Modern dark theme
+                shortcuts="vscode",  # VSCode-like shortcuts
+                focus=False,
+                buttons=editor_btns,
+                allow_reset=True,
+                key=f"code_editor_{script_key}",
+                options={
+                    "wrap": True,
+                    "showLineNumbers": True,
+                    "highlightActiveLine": True,
+                    "showPrintMargin": False,
+                    "fontSize": 14,
+                    "enableBasicAutocompletion": True,
+                    "enableLiveAutocompletion": True,
+                    "enableSnippets": True,
+                    "showGutter": True,
+                    "displayIndentGuides": True,
+                    "highlightSelectedWord": True,
+                }
             )
 
-        with col_meta4:
-            script_desc = st.text_input("Description", value=st.session_state.current_script["description"])
+            # Extract code from editor response
+            if response_dict and "text" in response_dict:
+                script_code = response_dict["text"]
+            else:
+                script_code = st.session_state.current_script["code"]
 
-        st.subheader("🖥️ Code Editor")
+            # Compact input section
+            st.markdown("**📥 Input (stdin)**")
+            script_input = st.text_area(
+                "stdin",
+                height=100,
+                placeholder="Enter input for script (if needed)",
+                key="input_area",
+                label_visibility="collapsed"
+            )
 
-        # Configure code editor with modern features
-        editor_btns = [{
-            "name": "Copy",
-            "feather": "Copy",
-            "hasText": True,
-            "alwaysOn": True,
-            "commands": ["copyAll"],
-            "style": {"top": "0.46rem", "right": "0.4rem"}
-        }]
+        with output_col:
+            st.markdown("**📊 Output**")
 
-        # Custom CSS for better editor appearance
-        custom_css = """
-        .ace_editor {
-            border-radius: 8px !important;
-            border: 2px solid #4a5568 !important;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
-        }
-        """
+            # Output section
+            if "last_result" in st.session_state:
+                result = st.session_state.last_result
 
-        response_dict = code_editor(
-            st.session_state.current_script["code"],
-            lang="python",
-            height=[20, 30],  # min, max rows
-            theme="contrast",  # Modern dark theme
-            shortcuts="vscode",  # VSCode-like shortcuts
-            focus=False,
-            buttons=editor_btns,
-            allow_reset=True,
-            key="code_editor_widget",
-            options={
-                "wrap": True,
-                "showLineNumbers": True,
-                "highlightActiveLine": True,
-                "showPrintMargin": False,
-                "fontSize": 14,
-                "enableBasicAutocompletion": True,
-                "enableLiveAutocompletion": True,
-                "enableSnippets": True,
-                "showGutter": True,
-                "displayIndentGuides": True,
-                "highlightSelectedWord": True,
-            }
-        )
-
-        # Extract code from editor response
-        if response_dict and "text" in response_dict:
-            script_code = response_dict["text"]
-        else:
-            script_code = st.session_state.current_script["code"]
-
-        st.subheader("Input (stdin)")
-        script_input = st.text_area(
-            "Enter input for script (if used)",
-            height=100,
-            help="Provide input that the script can read using input()",
-            key="input_area"
-        )
-
-        # Update session state with edits
-        st.session_state.current_script["name"] = script_name
-        st.session_state.current_script["code"] = script_code
-        st.session_state.current_script["description"] = script_desc
-        st.session_state.current_script["tags"] = [t.strip() for t in script_tags.split(",") if t.strip()]
-        st.session_state.current_script["collection"] = selected_collection
-
-        # Action Buttons
-        col_act1, col_act2, col_act3, col_act4 = st.columns(4)
-
-        with col_act1:
-            if st.button("💾 Save Script"):
-                if not script_name:
-                    st.error("Please provide a script name")
-                else:
-                    # Check for Move/Rename
-                    orig_name = st.session_state.current_script.get("original_name")
-                    orig_col = st.session_state.current_script.get("original_collection")
-
-                    if runner.save_script(
-                        script_name,
-                        script_code,
-                        selected_collection,
-                        script_desc,
-                        st.session_state.current_script["tags"]
-                    ):
-                        # If successful save, check if we need to delete the old one
-                        if orig_name and orig_col:
-                            if orig_name != script_name or orig_col != selected_collection:
-                                runner.delete_script(orig_name, orig_col)
-                                st.success(f"Moved script from {orig_col}/{orig_name} to {selected_collection}/{script_name}")
-                        else:
-                            st.success(f"Saved {script_name} to {selected_collection}")
-
-                        # Update state to reflect new identity
-                        st.session_state.current_script["original_name"] = script_name
-                        st.session_state.current_script["original_collection"] = selected_collection
-
-                        st.rerun()
+                # Status indicators
+                status_col1, status_col2 = st.columns(2)
+                with status_col1:
+                    if result["success"]:
+                        st.success("✅ Success")
                     else:
-                        st.error("Failed to save script")
+                        st.error("❌ Failed")
+                with status_col2:
+                    st.info(f"⏱️ {result['execution_time']:.4f}s")
 
-        with col_act2:
-            if st.button("▶️ Run Script", type="primary"):
-                with st.spinner("Executing..."):
-                    result = runner.execute_script(script_code, script_input)
-                    st.session_state.last_result = result
+                # Output display
+                if result["stdout"]:
+                    st.text("Standard Output:")
+                    st.code(result["stdout"], language="text")
 
-        with col_act3:
-            if st.button("🗑️ Delete Script"):
-                current_script_name = st.session_state.current_script["name"]
-                if not current_script_name:
-                    st.warning("Cannot delete unsaved script")
-                else:
-                    # Use original collection if available, else current
-                    target_collection = st.session_state.current_script.get("original_collection") or selected_collection
-                    target_name = st.session_state.current_script.get("original_name") or current_script_name
+                if result["stderr"]:
+                    st.text("Error Output:")
+                    st.code(result["stderr"], language="text")
 
-                    if runner.delete_script(target_name, target_collection):
-                        st.success(f"Deleted {target_name}")
-                        # Reset state
-                        st.session_state.current_script = {
-                            "name": "",
-                            "code": "",
-                            "collection": "Uncategorized",
-                            "description": "",
-                            "tags": [],
-                            "original_name": None,
-                            "original_collection": None
-                        }
-                        st.rerun()
-                    else:
-                        st.error("Failed to delete script")
+                if result.get("error"):
+                    st.error(f"Error: {result['error']}")
 
-        with col_act4:
-             if st.button("❌ Delete Collection"):
-                 if selected_collection == "Uncategorized":
-                     st.error("Cannot delete 'Uncategorized' collection")
-                 else:
-                     if runner.collection_manager.delete_collection(selected_collection):
-                         st.success(f"Deleted collection {selected_collection}")
-                         st.session_state.current_script["collection"] = "Uncategorized"
-                         st.rerun()
-                     else:
-                         st.error("Failed to delete collection")
+                if result.get("result") is not None:
+                    st.text("Return Value:")
+                    st.write(result["result"])
 
-
-        # Output Section
-        if "last_result" in st.session_state:
-            result = st.session_state.last_result
-            st.markdown("---")
-            st.subheader("Output")
-
-            col_controls1, col_controls2 = st.columns([1, 4])
-            with col_controls1:
-                if st.button("🗑️ Clear Output"):
-                    del st.session_state.last_result
-                    st.rerun()
-
-            col_res1, col_res2 = st.columns(2)
-            with col_res1:
-                if result["success"]:
-                    st.success("✅ Execution Successful")
-                else:
-                    st.error("❌ Execution Failed")
-            with col_res2:
-                st.info(f"⏱️ Time: {result['execution_time']:.4f}s")
-
-            if result["stdout"]:
-                st.text("Standard Output:")
-                st.code(result["stdout"], language="text")
-
-            if result["stderr"]:
-                st.text("Error Output:")
-                st.code(result["stderr"], language="text")
-
-            if result.get("error"):
-                st.error(f"Error: {result['error']}")
-
-            if result.get("result") is not None:
-                st.text("Return Value:")
-                st.write(result["result"])
-
-            # Prepare download
-            output_content = f"""Execution Report
+                # Download output
+                output_content = f"""Execution Report
 Date: {datetime.now().isoformat()}
 Status: {'Success' if result['success'] else 'Failed'}
 Execution Time: {result['execution_time']:.4f}s
@@ -776,12 +718,110 @@ Execution Time: {result['execution_time']:.4f}s
 --- ERROR ---
 {result.get('error', 'None')}
 """
-            st.download_button(
-                label="📥 Download Output",
-                data=output_content,
-                file_name=f"execution_output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                mime="text/plain"
-            )
+                st.download_button(
+                    label="📥 Download",
+                    data=output_content,
+                    file_name=f"output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+            else:
+                st.info("👉 Run a script to see output here")
+                st.markdown("---")
+                st.markdown("""
+                **Quick Tips:**
+                - Use `print()` for output
+                - Access stdin via text area below
+                - Check execution time and errors
+                - Download results as needed
+                """)
+
+        # Update session state with edits
+        st.session_state.current_script["name"] = script_name
+        st.session_state.current_script["code"] = script_code
+        st.session_state.current_script["description"] = script_desc
+        st.session_state.current_script["tags"] = [t.strip() for t in script_tags.split(",") if t.strip()]
+        st.session_state.current_script["collection"] = selected_collection
+
+        # Handle button actions
+        if save_clicked:
+            if not script_name:
+                st.error("⚠️ Please provide a script name")
+            else:
+                # Check for Move/Rename
+                orig_name = st.session_state.current_script.get("original_name")
+                orig_col = st.session_state.current_script.get("original_collection")
+
+                if runner.save_script(
+                    script_name,
+                    script_code,
+                    selected_collection,
+                    script_desc,
+                    st.session_state.current_script["tags"]
+                ):
+                    # Get the saved path
+                    clean_name = "".join(c for c in script_name if c.isalnum() or c in ('-', '_')).strip()
+                    saved_path = f"./scripts/{selected_collection}/{clean_name}.py"
+
+                    # If successful save, check if we need to delete the old one
+                    if orig_name and orig_col:
+                        if orig_name != script_name or orig_col != selected_collection:
+                            runner.delete_script(orig_name, orig_col)
+                            st.success(f"✅ Moved script from `{orig_col}/{orig_name}` to `{selected_collection}/{script_name}`\n\n📁 Saved at: `{saved_path}`")
+                    else:
+                        st.success(f"✅ Saved `{script_name}` to collection `{selected_collection}`\n\n📁 Path: `{saved_path}`")
+
+                    # Update state to reflect new identity
+                    st.session_state.current_script["original_name"] = script_name
+                    st.session_state.current_script["original_collection"] = selected_collection
+
+                    # Increment refresh counter to force editor reload
+                    st.session_state.editor_refresh_counter = st.session_state.get('editor_refresh_counter', 0) + 1
+
+                    time.sleep(1.5)  # Show message briefly
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to save script")
+
+        if run_clicked:
+            with st.spinner("⚙️ Executing..."):
+                result = runner.execute_script(script_code, script_input)
+                st.session_state.last_result = result
+                st.rerun()
+
+        if delete_clicked:
+            current_script_name = st.session_state.current_script["name"]
+            if not current_script_name:
+                st.warning("⚠️ Cannot delete unsaved script")
+            else:
+                # Use original collection if available, else current
+                target_collection = st.session_state.current_script.get("original_collection") or selected_collection
+                target_name = st.session_state.current_script.get("original_name") or current_script_name
+
+                if runner.delete_script(target_name, target_collection):
+                    st.success(f"✅ Deleted `{target_name}` from `{target_collection}`")
+                    # Reset state
+                    st.session_state.current_script = {
+                        "name": "",
+                        "code": "",
+                        "collection": "Uncategorized",
+                        "description": "",
+                        "tags": [],
+                        "original_name": None,
+                        "original_collection": None
+                    }
+                    if "last_result" in st.session_state:
+                        del st.session_state.last_result
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to delete script")
+
+        if clear_output_clicked:
+            if "last_result" in st.session_state:
+                del st.session_state.last_result
+                st.rerun()
+            else:
+                st.info("ℹ️ No output to clear")
 
     # Settings Page
     elif page == "⚙️ Settings":
