@@ -59,11 +59,12 @@ class GrammarCorrector:
         self.model = genai.GenerativeModel(self.model_name)
 
         # Generation config for deterministic grammar fixes
+        # Increased max_output_tokens to handle longer text (paragraphs)
         self.generation_config = {
             "temperature": 0.2,
             "top_p": 0.8,
             "top_k": 40,
-            "max_output_tokens": 512,
+            "max_output_tokens": 8192,  # Increased from 512 to handle longer text
         }
 
     def _calculate_delay(self, attempt: int) -> float:
@@ -72,17 +73,20 @@ class GrammarCorrector:
         jitter = random.uniform(0, delay * 0.1)
         return delay + jitter
 
-    def _build_prompt(self, sentence: str) -> str:
+    def _build_prompt(self, text: str) -> str:
         """
         Build a strict grammar-correction prompt.
-        Ensures output contains ONLY the corrected sentence.
+        Ensures output contains ONLY the corrected text.
+        Handles both single sentences and multi-line paragraphs.
         """
         return (
-            "You are a grammar correction engine.\n"
-            "Correct the sentence below.\n"
-            "Return ONLY the corrected sentence. Do not explain.\n\n"
-            f"Sentence: {sentence}\n"
-            "Corrected:"
+            "You are a professional grammar and spelling correction engine.\n"
+            "Your task is to correct all grammar, spelling, and punctuation errors in the text below.\n"
+            "Preserve the original formatting, line breaks, and structure.\n"
+            "Return ONLY the corrected text without any explanations, comments, or additional formatting.\n"
+            "Do not add introductory phrases like 'Here is' or 'Corrected version'.\n\n"
+            f"Text to correct:\n{text}\n\n"
+            "Corrected text:"
         )
 
     def _extract_text(self, response) -> str:
@@ -101,7 +105,7 @@ class GrammarCorrector:
         except Exception:
             return ""
 
-    def _execute_with_retry(self, sentence: str) -> str:
+    def _execute_with_retry(self, text: str) -> str:
         """
         Execute grammar correction with retry logic
         """
@@ -109,7 +113,7 @@ class GrammarCorrector:
 
         for attempt in range(self.max_retries):
             try:
-                prompt = self._build_prompt(sentence)
+                prompt = self._build_prompt(text)
 
                 response = self.model.generate_content(
                     prompt,
@@ -144,29 +148,29 @@ class GrammarCorrector:
             "Grammar correction failed after all retries"
         )
 
-    def correct(self, sentence: str) -> Dict[str, Any]:
+    def correct(self, text: str) -> Dict[str, Any]:
         """
-        Correct grammar in a sentence
+        Correct grammar in text (can be single sentence or multiple paragraphs)
         """
-        if not sentence or len(sentence.strip()) < 3:
+        if not text or len(text.strip()) < 3:
             return {
                 "success": False,
-                "original": sentence,
-                "error": "Please enter a sentence with at least 3 characters.",
+                "original": text,
+                "error": "Please enter text with at least 3 characters.",
             }
 
         try:
-            corrected = self._execute_with_retry(sentence)
+            corrected = self._execute_with_retry(text)
             return {
                 "success": True,
-                "original": sentence,
+                "original": text,
                 "corrected": corrected,
             }
 
         except RateLimitError:
             return {
                 "success": False,
-                "original": sentence,
+                "original": text,
                 "error": (
                     "Rate limit exceeded. Please try again later or "
                     "check your quota at https://aistudio.google.com/"
@@ -176,14 +180,14 @@ class GrammarCorrector:
         except GrammarCorrectionError as e:
             return {
                 "success": False,
-                "original": sentence,
+                "original": text,
                 "error": str(e),
             }
 
         except Exception as e:
             return {
                 "success": False,
-                "original": sentence,
+                "original": text,
                 "error": f"Unexpected error: {e}",
             }
 

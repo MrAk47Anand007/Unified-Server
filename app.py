@@ -13,6 +13,7 @@ from datetime import datetime
 import streamlit as st
 from dotenv import load_dotenv
 import json
+from code_editor import code_editor
 
 # Windows fix for asyncio
 if sys.platform == "win32":
@@ -313,20 +314,28 @@ def main():
 
     # Grammar Correction Page
     elif page == "✍️ Grammar Correction":
-        st.header("LinguaFix - Grammar Correction")
-        st.write("Perfect your writing with AI-powered grammar correction")
+        st.header("✍️ LinguaFix - Grammar Correction")
+        st.write("Perfect your writing with AI-powered grammar correction. Now supports paragraphs and long text!")
 
         # Check if API key is set
         if not os.getenv('GEMINI_API_KEY'):
             st.warning("⚠️ Gemini API key not set. Please configure it in Settings.")
+            st.info("💡 Get your free API key from [Google AI Studio](https://aistudio.google.com/apikey)")
 
         sentence = st.text_area(
             "Enter text to correct",
             value=cache.get('last_sentence', ''),
-            placeholder="Enter a sentence to correct, for example: 'he walk to the store yesteday.'",
-            height=150,
-            help="Type or paste the text you want to correct"
+            placeholder="Enter text to correct. Can be a single sentence, multiple sentences, or even full paragraphs.\n\nExample: 'he walk to the store yesteday. She dont like pizza. They was going too the park.'",
+            height=250,
+            help="Type or paste the text you want to correct. Supports multi-line text and paragraphs.",
+            max_chars=5000
         )
+
+        # Character count
+        char_count = len(sentence)
+        col_info1, col_info2 = st.columns([3, 1])
+        with col_info2:
+            st.caption(f"Characters: {char_count}/5000")
 
         if st.button("✨ Fix Grammar", type="primary"):
             if not sentence or len(sentence.strip()) < 3:
@@ -349,15 +358,39 @@ def main():
                         if result["success"]:
                             st.success("✅ Grammar corrected!")
 
+                            # Display results in expandable sections for better readability
                             col1, col2 = st.columns(2)
 
                             with col1:
-                                st.subheader("Original")
-                                st.info(result["original"])
+                                st.subheader("📝 Original Text")
+                                with st.container():
+                                    st.text_area(
+                                        "Original",
+                                        value=result["original"],
+                                        height=200,
+                                        disabled=True,
+                                        label_visibility="collapsed"
+                                    )
 
                             with col2:
-                                st.subheader("Corrected")
-                                st.success(result["corrected"])
+                                st.subheader("✨ Corrected Text")
+                                with st.container():
+                                    st.text_area(
+                                        "Corrected",
+                                        value=result["corrected"],
+                                        height=200,
+                                        disabled=True,
+                                        label_visibility="collapsed"
+                                    )
+
+                            # Copy button for corrected text
+                            st.download_button(
+                                label="📋 Copy Corrected Text",
+                                data=result["corrected"],
+                                file_name="corrected_text.txt",
+                                mime="text/plain",
+                                help="Download the corrected text"
+                            )
                         else:
                             st.error(f"❌ {result['error']}")
 
@@ -542,14 +575,57 @@ def main():
         with col_meta4:
             script_desc = st.text_input("Description", value=st.session_state.current_script["description"])
 
-        st.subheader("Code Editor")
-        script_code = st.text_area(
-            "Python Code",
-            value=st.session_state.current_script["code"],
-            height=300,
-            help="Write your Python code here. Use 'print()' for output.",
-            key="editor_area" # distinct key
+        st.subheader("🖥️ Code Editor")
+
+        # Configure code editor with modern features
+        editor_btns = [{
+            "name": "Copy",
+            "feather": "Copy",
+            "hasText": True,
+            "alwaysOn": True,
+            "commands": ["copyAll"],
+            "style": {"top": "0.46rem", "right": "0.4rem"}
+        }]
+
+        # Custom CSS for better editor appearance
+        custom_css = """
+        .ace_editor {
+            border-radius: 8px !important;
+            border: 2px solid #4a5568 !important;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
+        }
+        """
+
+        response_dict = code_editor(
+            st.session_state.current_script["code"],
+            lang="python",
+            height=[20, 30],  # min, max rows
+            theme="contrast",  # Modern dark theme
+            shortcuts="vscode",  # VSCode-like shortcuts
+            focus=False,
+            buttons=editor_btns,
+            allow_reset=True,
+            key="code_editor_widget",
+            options={
+                "wrap": True,
+                "showLineNumbers": True,
+                "highlightActiveLine": True,
+                "showPrintMargin": False,
+                "fontSize": 14,
+                "enableBasicAutocompletion": True,
+                "enableLiveAutocompletion": True,
+                "enableSnippets": True,
+                "showGutter": True,
+                "displayIndentGuides": True,
+                "highlightSelectedWord": True,
+            }
         )
+
+        # Extract code from editor response
+        if response_dict and "text" in response_dict:
+            script_code = response_dict["text"]
+        else:
+            script_code = st.session_state.current_script["code"]
 
         st.subheader("Input (stdin)")
         script_input = st.text_area(
@@ -778,18 +854,23 @@ Execution Time: {result['execution_time']:.4f}s
         - Configurable file size limits
         - Generates comprehensive text digests
         
-        **LinguaFix Grammar Correction**
-        - AI-powered grammar correction using Google Gemini
-        - **Retry logic with exponential backoff** for rate limit handling
-        - Real-time text analysis
-        - Simple and intuitive interface
-        - Robust error handling
+        **LinguaFix Grammar Correction** (Enhanced!)
+        - ✨ AI-powered grammar correction using Google Gemini 2.5 Flash
+        - 📄 **Now supports long text and multi-paragraph content** (up to 5000 characters)
+        - 🔄 Retry logic with exponential backoff for rate limit handling
+        - 📊 Real-time character count
+        - 💾 Download corrected text
+        - 🎨 Side-by-side comparison view
+        - 🚀 Robust error handling with helpful feedback
         
-        **Script Runner**
-        - Write and execute Python scripts directly in the browser
-        - Organize scripts into collections
-        - Secure execution environment
-        - Capture stdout, stderr, and return values
+        **Python Script Runner** (Modernized!)
+        - 🎨 **Modern Code Editor** with syntax highlighting, line numbers, and autocomplete
+        - 📦 Organize scripts into collections (Postman-like)
+        - 🔒 Secure sandboxed execution environment
+        - 📊 Capture stdout, stderr, and return values
+        - ⌨️ VSCode-like keyboard shortcuts
+        - 🎯 Smart autocompletion and code snippets
+        - 📝 Script tagging and search functionality
 
         ### 🔧 Technologies
         - **Streamlit** - Web interface
