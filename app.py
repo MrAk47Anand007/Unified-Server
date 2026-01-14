@@ -9,6 +9,7 @@ import sys
 import asyncio
 from pathlib import Path
 from typing import Optional, Tuple
+from datetime import datetime
 import streamlit as st
 from dotenv import load_dotenv
 import json
@@ -32,6 +33,13 @@ try:
     from grammar_corrector import GrammarCorrector, GrammarCorrectionError
 except ImportError:
     st.error("grammar_corrector.py module not found")
+    st.stop()
+
+# Import Script Runner
+try:
+    from script_runner import ScriptRunner
+except ImportError:
+    st.error("script_runner.py module not found")
     st.stop()
 
 # Cache file for storing settings
@@ -185,7 +193,7 @@ def main():
     st.sidebar.title("Navigation")
     page = st.sidebar.radio(
         "Choose Feature",
-        ["🗂️ GitRepo Extractor", "✍️ Grammar Correction", "⚙️ Settings", "ℹ️ About"]
+        ["🗂️ GitRepo Extractor", "✍️ Grammar Correction", "🐍 Script Runner", "⚙️ Settings", "ℹ️ About"]
     )
 
     # GitRepo Extractor Page
@@ -358,6 +366,347 @@ def main():
                     except Exception as e:
                         st.error(f"❌ Unexpected error: {str(e)}")
 
+    # Script Runner Page
+    elif page == "🐍 Script Runner":
+        st.header("🐍 Python Script Runner")
+        st.write("Run and organize your Python scripts")
+
+        # Initialize Script Runner
+        runner = ScriptRunner()
+
+        # Sidebar: Collections & Navigation
+        st.sidebar.markdown("---")
+
+        # Search
+        search_query = st.sidebar.text_input("🔍 Search Scripts", placeholder="Name or tag...")
+
+        # Recent Scripts
+        st.sidebar.subheader("🕒 Recent Scripts")
+        all_scripts = runner.list_all_scripts()
+
+        def get_mod_time(s):
+            return s.get("modified", s.get("created", ""))
+
+        recent_scripts = sorted(all_scripts, key=get_mod_time, reverse=True)[:5]
+
+        for s in recent_scripts:
+            if st.sidebar.button(f"{s['name']} ({s['collection']})", key=f"recent_{s['collection']}_{s['name']}"):
+                loaded = runner.load_script(s["name"], s["collection"])
+                if loaded:
+                    st.session_state.current_script = {
+                        "name": loaded["metadata"]["name"],
+                        "code": loaded["code"],
+                        "collection": s["collection"],
+                        "description": loaded["metadata"].get("description", ""),
+                        "tags": loaded["metadata"].get("tags", [])
+                    }
+                    st.rerun()
+
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📁 Collections")
+
+        collections = runner.collection_manager.list_collections()
+
+        # 1. State Initialization
+        if "current_script" not in st.session_state:
+            # Try to load from cache
+            sr_cache = cache.get('script_runner', {})
+            last_collection = sr_cache.get('last_collection', 'Uncategorized')
+            last_script = sr_cache.get('last_script', '')
+
+            # Verify collection exists
+            if last_collection not in collections:
+                last_collection = "Uncategorized"
+
+            initial_state = {
+                "name": "",
+                "code": "",
+                "collection": last_collection,
+                "description": "",
+                "tags": [],
+                "original_name": None,
+                "original_collection": None
+            }
+
+            # If we have a last script, try to load it
+            if last_script:
+                loaded = runner.load_script(last_script, last_collection)
+                if loaded:
+                     initial_state = {
+                        "name": loaded["metadata"]["name"],
+                        "code": loaded["code"],
+                        "collection": last_collection,
+                        "description": loaded["metadata"].get("description", ""),
+                        "tags": loaded["metadata"].get("tags", []),
+                        "original_name": loaded["metadata"]["name"],
+                        "original_collection": last_collection
+                    }
+
+            st.session_state.current_script = initial_state
+
+        # 2. Sidebar Navigation Tree
+        for col_name in collections:
+            col_scripts = runner.collection_manager.get_scripts_in_collection(col_name)
+
+            # Filter if search query exists
+            if search_query:
+                col_scripts = [s for s in col_scripts if search_query.lower() in s["name"].lower() or any(search_query.lower() in t.lower() for t in s.get("tags", []))]
+                if not col_scripts:
+                    continue # Skip empty collections during search
+
+            with st.sidebar.expander(f"{col_name} ({len(col_scripts)})", expanded=(col_name == st.session_state.current_script["collection"] or bool(search_query))):
+
+                # Button to select/create new in this collection (only show if not searching or matches logic?)
+                # Keeping it always available in expander
+                if st.button("➕ New Script", key=f"new_{col_name}"):
+                    st.session_state.current_script = {
+                        "name": "",
+                        "code": "",
+                        "collection": col_name,
+                        "description": "",
+                        "tags": [],
+                        "original_name": None,
+                        "original_collection": None
+                    }
+                    st.rerun()
+
+                for s in col_scripts:
+                    # Highlight active script
+                    is_active = (s["name"] == st.session_state.current_script["name"] and col_name == st.session_state.current_script["collection"])
+                    label = f"{'🟢 ' if is_active else ''}{s['name']}"
+
+                    if st.button(label, key=f"nav_{col_name}_{s['name']}"):
+                        loaded = runner.load_script(s["name"], col_name)
+                        if loaded:
+                            st.session_state.current_script = {
+                                "name": loaded["metadata"]["name"],
+                                "code": loaded["code"],
+                                "collection": col_name,
+                                "description": loaded["metadata"].get("description", ""),
+                                "tags": loaded["metadata"].get("tags", []),
+                                "original_name": loaded["metadata"]["name"],
+                                "original_collection": col_name
+                            }
+                            # Update Cache
+                            sr_cache = cache.get('script_runner', {})
+                            sr_cache['last_collection'] = col_name
+                            sr_cache['last_script'] = s["name"]
+                            cache['script_runner'] = sr_cache
+                            save_cache(cache)
+                            st.rerun()
+
+        st.sidebar.markdown("---")
+
+        # Collection management in sidebar
+        with st.sidebar.popover("➕ Create Collection"):
+            new_col_name = st.text_input("Collection Name", placeholder="My Scripts")
+            if st.button("Create"):
+                if new_col_name:
+                    if runner.collection_manager.create_collection(new_col_name):
+                        st.sidebar.success(f"Created {new_col_name}")
+                        st.rerun()
+                    else:
+                        st.error("Collection already exists")
+
+        # 3. Main Area - Script Editor
+
+        # Helper to determine if we are editing a new or existing script
+        is_new_script = not st.session_state.current_script["name"]
+
+        if is_new_script:
+            st.subheader(f"📝 New Script in {st.session_state.current_script['collection']}")
+        else:
+            st.subheader(f"📝 Editing: {st.session_state.current_script['name']}")
+
+        # Editor Section
+        col_meta1, col_meta2 = st.columns(2)
+        with col_meta1:
+            script_name = st.text_input("Script Name", value=st.session_state.current_script["name"])
+        with col_meta2:
+            script_tags = st.text_input("Tags (comma separated)", value=",".join(st.session_state.current_script["tags"]))
+
+        col_meta3, col_meta4 = st.columns(2)
+        with col_meta3:
+            # Collection Dropdown (Assignment)
+            current_col_idx = 0
+            if st.session_state.current_script["collection"] in collections:
+                current_col_idx = collections.index(st.session_state.current_script["collection"])
+
+            selected_collection = st.selectbox(
+                "Collection",
+                collections,
+                index=current_col_idx,
+                help="Move script to another collection by changing this and saving"
+            )
+
+        with col_meta4:
+            script_desc = st.text_input("Description", value=st.session_state.current_script["description"])
+
+        st.subheader("Code Editor")
+        script_code = st.text_area(
+            "Python Code",
+            value=st.session_state.current_script["code"],
+            height=300,
+            help="Write your Python code here. Use 'print()' for output.",
+            key="editor_area" # distinct key
+        )
+
+        st.subheader("Input (stdin)")
+        script_input = st.text_area(
+            "Enter input for script (if used)",
+            height=100,
+            help="Provide input that the script can read using input()",
+            key="input_area"
+        )
+
+        # Update session state with edits
+        st.session_state.current_script["name"] = script_name
+        st.session_state.current_script["code"] = script_code
+        st.session_state.current_script["description"] = script_desc
+        st.session_state.current_script["tags"] = [t.strip() for t in script_tags.split(",") if t.strip()]
+        st.session_state.current_script["collection"] = selected_collection
+
+        # Action Buttons
+        col_act1, col_act2, col_act3, col_act4 = st.columns(4)
+
+        with col_act1:
+            if st.button("💾 Save Script"):
+                if not script_name:
+                    st.error("Please provide a script name")
+                else:
+                    # Check for Move/Rename
+                    orig_name = st.session_state.current_script.get("original_name")
+                    orig_col = st.session_state.current_script.get("original_collection")
+
+                    if runner.save_script(
+                        script_name,
+                        script_code,
+                        selected_collection,
+                        script_desc,
+                        st.session_state.current_script["tags"]
+                    ):
+                        # If successful save, check if we need to delete the old one
+                        if orig_name and orig_col:
+                            if orig_name != script_name or orig_col != selected_collection:
+                                runner.delete_script(orig_name, orig_col)
+                                st.success(f"Moved script from {orig_col}/{orig_name} to {selected_collection}/{script_name}")
+                        else:
+                            st.success(f"Saved {script_name} to {selected_collection}")
+
+                        # Update state to reflect new identity
+                        st.session_state.current_script["original_name"] = script_name
+                        st.session_state.current_script["original_collection"] = selected_collection
+
+                        st.rerun()
+                    else:
+                        st.error("Failed to save script")
+
+        with col_act2:
+            if st.button("▶️ Run Script", type="primary"):
+                with st.spinner("Executing..."):
+                    result = runner.execute_script(script_code, script_input)
+                    st.session_state.last_result = result
+
+        with col_act3:
+            if st.button("🗑️ Delete Script"):
+                current_script_name = st.session_state.current_script["name"]
+                if not current_script_name:
+                    st.warning("Cannot delete unsaved script")
+                else:
+                    # Use original collection if available, else current
+                    target_collection = st.session_state.current_script.get("original_collection") or selected_collection
+                    target_name = st.session_state.current_script.get("original_name") or current_script_name
+
+                    if runner.delete_script(target_name, target_collection):
+                        st.success(f"Deleted {target_name}")
+                        # Reset state
+                        st.session_state.current_script = {
+                            "name": "",
+                            "code": "",
+                            "collection": "Uncategorized",
+                            "description": "",
+                            "tags": [],
+                            "original_name": None,
+                            "original_collection": None
+                        }
+                        st.rerun()
+                    else:
+                        st.error("Failed to delete script")
+
+        with col_act4:
+             if st.button("❌ Delete Collection"):
+                 if selected_collection == "Uncategorized":
+                     st.error("Cannot delete 'Uncategorized' collection")
+                 else:
+                     if runner.collection_manager.delete_collection(selected_collection):
+                         st.success(f"Deleted collection {selected_collection}")
+                         st.session_state.current_script["collection"] = "Uncategorized"
+                         st.rerun()
+                     else:
+                         st.error("Failed to delete collection")
+
+
+        # Output Section
+        if "last_result" in st.session_state:
+            result = st.session_state.last_result
+            st.markdown("---")
+            st.subheader("Output")
+
+            col_controls1, col_controls2 = st.columns([1, 4])
+            with col_controls1:
+                if st.button("🗑️ Clear Output"):
+                    del st.session_state.last_result
+                    st.rerun()
+
+            col_res1, col_res2 = st.columns(2)
+            with col_res1:
+                if result["success"]:
+                    st.success("✅ Execution Successful")
+                else:
+                    st.error("❌ Execution Failed")
+            with col_res2:
+                st.info(f"⏱️ Time: {result['execution_time']:.4f}s")
+
+            if result["stdout"]:
+                st.text("Standard Output:")
+                st.code(result["stdout"], language="text")
+
+            if result["stderr"]:
+                st.text("Error Output:")
+                st.code(result["stderr"], language="text")
+
+            if result.get("error"):
+                st.error(f"Error: {result['error']}")
+
+            if result.get("result") is not None:
+                st.text("Return Value:")
+                st.write(result["result"])
+
+            # Prepare download
+            output_content = f"""Execution Report
+Date: {datetime.now().isoformat()}
+Status: {'Success' if result['success'] else 'Failed'}
+Execution Time: {result['execution_time']:.4f}s
+
+--- STDOUT ---
+{result['stdout']}
+
+--- STDERR ---
+{result['stderr']}
+
+--- RESULT ---
+{result['result']}
+
+--- ERROR ---
+{result.get('error', 'None')}
+"""
+            st.download_button(
+                label="📥 Download Output",
+                data=output_content,
+                file_name=f"execution_output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                mime="text/plain"
+            )
+
     # Settings Page
     elif page == "⚙️ Settings":
         st.header("Settings")
@@ -436,12 +785,18 @@ def main():
         - Simple and intuitive interface
         - Robust error handling
         
+        **Script Runner**
+        - Write and execute Python scripts directly in the browser
+        - Organize scripts into collections
+        - Secure execution environment
+        - Capture stdout, stderr, and return values
+
         ### 🔧 Technologies
         - **Streamlit** - Web interface
         - **gitingest** - Repository extraction
         - **Google Generative AI** - AI operations
         - **Python** - Backend processing
-        - **Modular Architecture** - Separate grammar_corrector.py module
+        - **Modular Architecture** - Separate grammar_corrector.py and script_runner.py modules
         
         ### ⚡ Rate Limit Handling
         
